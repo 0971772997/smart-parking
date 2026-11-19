@@ -24,13 +24,11 @@ services:
       # Cac bien bi mat: Render se hoi khi tao Blueprint
       - key: DATABASE_URL
         sync: false
+      # Broker cong khai (HiveMQ Cloud khong con goi free). Neu doi sang broker rieng:
+      # them MQTT_USERNAME / MQTT_PASSWORD va doi MQTT_URL thanh mqtts://...:8883
       - key: MQTT_URL
-        sync: false
-      - key: MQTT_USERNAME
-        sync: false
-      - key: MQTT_PASSWORD
-        sync: false
+        value: mqtt://broker.hivemq.com:1883
       - key: ADMIN_EMAIL
-        sync: false
+        value: admin@smartparking.vn
       - key: ADMIN_PASSWORD
         sync: false
