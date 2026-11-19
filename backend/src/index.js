@@ -23,7 +23,7 @@ async function main() {
 
   const sync = createSync(db);
   const device = createMqttBridge(config.mqtt, sync, { timeoutMs: config.deviceTimeoutMs });
-  const app = createApp({ db, auth: createAuth(config), device });
+  const app = createApp({ db, auth: createAuth(config), device, otpDevMode: config.otpDevMode });
 
   const server = app.listen(config.port, () => console.log(`[API] Dang chay tai cong ${config.port}`));
 

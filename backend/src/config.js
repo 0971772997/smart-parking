@@ -24,6 +24,7 @@ module.exports = {
     password: process.env.MQTT_PASSWORD || undefined,
     topicPrefix: process.env.MQTT_TOPIC_PREFIX || 'smartparking',
   },
+  otpDevMode: process.env.OTP_DEV_MODE !== 'false',   // tra ma OTP ve app (chua co SMS)
   deviceTimeoutMs: Number(process.env.DEVICE_TIMEOUT_MS) || 8000,
   admin: {
     email: process.env.ADMIN_EMAIL,

@@ -1,32 +1,58 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const { wrap, conflict, HttpError } = require('../errors');
+const { wrap, conflict, notFound, badRequest, HttpError } = require('../errors');
 const v = require('../validate');
 const map = require('../mappers');
+const { createOtpService } = require('../otp');
 
-module.exports = function authRoutes({ db, auth }) {
+const USERNAME_RE = /^[a-zA-Z0-9_.]{4,30}$/;
+
+// Chuan hoa SDT Viet Nam: bo ky tu thua, +84/84 -> 0. Tra ve null neu sai dinh dang.
+function normalizePhone(raw) {
+  if (raw === undefined || raw === null || raw === '') return null;
+  let p = String(raw).replace(/[\s.-]/g, '');
+  if (p.startsWith('+84')) p = '0' + p.slice(3);
+  else if (/^84\d{9}$/.test(p)) p = '0' + p.slice(2);
+  return /^0\d{9}$/.test(p) ? p : undefined;
+}
+function phone(body, key = 'phone', { optional = false } = {}) {
+  const p = normalizePhone(body?.[key]);
+  if (p === null && optional) return null;
+  if (!p) throw badRequest('validation_error', 'So dien thoai khong hop le (vd: 0901234567)');
+  return p;
+}
+
+const maskEmail = (e) => e.replace(/^(.{2})[^@]*(@.*)$/, (_, a, b) => `${a}***${b}`);
+const maskPhone = (p) => (p ? p.slice(0, 3) + '****' + p.slice(-3) : null);
+
+module.exports = function authRoutes({ db, auth, otpDevMode = true }) {
   const r = express.Router();
+  const otp = createOtpService(db, { devMode: otpDevMode });
 
   r.post('/register', wrap(async (req, res) => {
+    const username = v.str(req.body, 'username', { pattern: USERNAME_RE });
     const email = v.email(req.body);
     const password = v.str(req.body, 'password', { min: 6, max: 72 });
-    const fullName = v.str(req.body, 'fullName', { max: 100 });
-    const phone = v.str(req.body, 'phone', { max: 20, optional: true, pattern: /^[0-9+ ]+$/ });
+    if (req.body.confirmPassword !== undefined && req.body.confirmPassword !== req.body.password) {
+      throw badRequest('password_mismatch', 'Mat khau xac nhan khong khop');
+    }
+    const fullName = v.str(req.body, 'fullName', { max: 100, optional: true });
+    const ph = phone(req.body, 'phone', { optional: true });
 
     const hash = await bcrypt.hash(password, 10);
-    let u;
     try {
-      u = await db.one(
-        `INSERT INTO users (email, password_hash, full_name, phone) VALUES ($1, $2, $3, $4) RETURNING *`,
-        [email, hash, fullName, phone],
-      );
+      const u = await db.one(
+        `INSERT INTO users (username, email, password_hash, full_name, phone) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [username, email, hash, fullName, ph]);
+      res.status(201).json({ token: auth.sign(u), user: map.user(u) });
     } catch (e) {
+      if (e.code === '23505' && /username/.test(e.constraint)) throw conflict('username_taken', 'Ten dang nhap da ton tai');
       if (e.code === '23505') throw conflict('email_taken', 'Email da duoc dang ky');
       throw e;
     }
-    res.status(201).json({ token: auth.sign(u), user: map.user(u) });
   }));
 
+  // Dang nhap bang ID (email) + mat khau
   r.post('/login', wrap(async (req, res) => {
     const email = v.email(req.body);
     const password = v.str(req.body, 'password', { max: 72 });
@@ -37,11 +63,69 @@ module.exports = function authRoutes({ db, auth }) {
     res.json({ token: auth.sign(u), user: map.user(u) });
   }));
 
+  // ---------- OTP ----------
+  // B1: xin ma. purpose: login_phone | find_id (username + phone), reset_password (email)
+  r.post('/otp', wrap(async (req, res) => {
+    const purpose = req.body?.purpose;
+    let u;
+    if (purpose === 'login_phone' || purpose === 'find_id') {
+      const username = v.str(req.body, 'username', { max: 30 });
+      const ph = phone(req.body);
+      u = await db.one('SELECT id, phone FROM users WHERE lower(username) = lower($1) AND phone = $2', [username, ph]);
+      if (!u) throw notFound('account_not_found', 'Khong tim thay tai khoan voi ten dang nhap va so dien thoai nay');
+    } else if (purpose === 'reset_password') {
+      const email = v.email(req.body);
+      u = await db.one('SELECT id, phone FROM users WHERE email = $1', [email]);
+      if (!u) throw notFound('account_not_found', 'Email chua duoc dang ky');
+    } else {
+      throw badRequest('validation_error', "purpose phai la 'login_phone', 'find_id' hoac 'reset_password'");
+    }
+    const out = await otp.issue(u.id, purpose);
+    res.status(201).json({ ...out, sentTo: maskPhone(u.phone) || 'email' });
+  }));
+
+  // B2a: dang nhap bang ten + SDT
+  r.post('/login/phone', wrap(async (req, res) => {
+    const userId = await otp.verify(req.body?.otpId, req.body?.code, 'login_phone');
+    const u = await db.one('SELECT * FROM users WHERE id = $1', [userId]);
+    res.json({ token: auth.sign(u), user: map.user(u) });
+  }));
+
+  // B2b: tim ID (email)
+  r.post('/find-id', wrap(async (req, res) => {
+    const userId = await otp.verify(req.body?.otpId, req.body?.code, 'find_id');
+    const u = await db.one('SELECT email, username, created_at FROM users WHERE id = $1', [userId]);
+    res.json({ email: u.email, maskedEmail: maskEmail(u.email), username: u.username, createdAt: u.created_at });
+  }));
+
+  // B2c: dat lai mat khau
+  r.post('/reset-password', wrap(async (req, res) => {
+    const newPassword = v.str(req.body, 'newPassword', { min: 6, max: 72 });
+    if (req.body.confirmPassword !== undefined && req.body.confirmPassword !== newPassword) {
+      throw badRequest('password_mismatch', 'Mat khau xac nhan khong khop');
+    }
+    const userId = await otp.verify(req.body?.otpId, req.body?.code, 'reset_password');
+    await db.query('UPDATE users SET password_hash = $2 WHERE id = $1', [userId, await bcrypt.hash(newPassword, 10)]);
+    res.json({ ok: true });
+  }));
+
+  // ---------- Tai khoan ----------
   r.get('/me', auth.requireAuth, wrap(async (req, res) => {
     const u = await db.one('SELECT * FROM users WHERE id = $1', [req.user.id]);
     if (!u) throw new HttpError(401, 'invalid_token', 'Tai khoan khong ton tai');
     res.json(map.user(u));
   }));
 
+  r.patch('/me', auth.requireAuth, wrap(async (req, res) => {
+    const fullName = v.str(req.body, 'fullName', { max: 100, optional: true });
+    const ph = phone(req.body, 'phone', { optional: true });
+    const u = await db.one(
+      `UPDATE users SET full_name = COALESCE($2, full_name), phone = COALESCE($3, phone) WHERE id = $1 RETURNING *`,
+      [req.user.id, fullName, ph]);
+    res.json(map.user(u));
+  }));
+
   return r;
 };
+
+module.exports.normalizePhone = normalizePhone;

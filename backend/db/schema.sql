@@ -14,6 +14,25 @@ CREATE TABLE IF NOT EXISTS users (
   created_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
+-- v2 (app di dong): ten dang nhap rieng, ho ten khong bat buoc
+ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(30);
+ALTER TABLE users ALTER COLUMN full_name DROP NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_users_username ON users (lower(username));
+CREATE INDEX IF NOT EXISTS idx_users_phone ON users (phone);
+
+-- Ma OTP (gia lap SMS): dang nhap bang ten + SDT, tim ID, dat lai mat khau
+CREATE TABLE IF NOT EXISTS otp_codes (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  purpose     VARCHAR(20) NOT NULL CHECK (purpose IN ('login_phone', 'find_id', 'reset_password')),
+  code_hash   VARCHAR(100) NOT NULL,
+  attempts    INT NOT NULL DEFAULT 0,
+  expires_at  TIMESTAMPTZ NOT NULL,
+  used_at     TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_otp_user ON otp_codes (user_id, created_at DESC);
+
 -- Xe cua nguoi dung
 CREATE TABLE IF NOT EXISTS vehicles (
   id           SERIAL PRIMARY KEY,

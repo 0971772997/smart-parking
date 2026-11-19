@@ -55,7 +55,10 @@ describe('He thong', () => {
 describe('Xac thuc', () => {
   test('Dang ky thanh cong', async () => {
     const r = await api().post('/api/auth/register')
-      .send({ email: 'An@Test.vn', password: '123456', fullName: 'Nguyen Van An', phone: '0901234567' }).expect(201);
+      .send({ username: 'an_nguyen', email: 'An@Test.vn', password: '123456', confirmPassword: '123456',
+        fullName: 'Nguyen Van An', phone: '+84 901 234 567' }).expect(201);
+    assert.equal(r.body.user.username, 'an_nguyen');
+    assert.equal(r.body.user.phone, '0901234567');
     assert.ok(r.body.token);
     assert.equal(r.body.user.email, 'an@test.vn');
     assert.equal(r.body.user.role, 'user');
@@ -64,13 +67,21 @@ describe('Xac thuc', () => {
   });
   test('Dang ky trung email -> 409', async () => {
     const r = await api().post('/api/auth/register')
-      .send({ email: 'an@test.vn', password: '123456', fullName: 'X' }).expect(409);
+      .send({ username: 'an_khac', email: 'an@test.vn', password: '123456' }).expect(409);
     assert.equal(r.body.error, 'email_taken');
+    const r2 = await api().post('/api/auth/register')
+      .send({ username: 'AN_NGUYEN', email: 'khac@test.vn', password: '123456' }).expect(409);
+    assert.equal(r2.body.error, 'username_taken');
   });
   test('Dang ky thieu/sai du lieu -> 400', async () => {
-    await api().post('/api/auth/register').send({ email: 'sai-email', password: '123456', fullName: 'X' }).expect(400);
-    await api().post('/api/auth/register').send({ email: 'b@test.vn', password: '123', fullName: 'X' }).expect(400);
-    await api().post('/api/auth/register').send({ email: 'b@test.vn', password: '123456' }).expect(400);
+    const reg = (b) => api().post('/api/auth/register').send(b);
+    await reg({ username: 'binh01', email: 'sai-email', password: '123456' }).expect(400);
+    await reg({ username: 'binh01', email: 'b@test.vn', password: '123' }).expect(400);
+    await reg({ email: 'b@test.vn', password: '123456' }).expect(400);
+    await reg({ username: 'a b', email: 'b@test.vn', password: '123456' }).expect(400);
+    await reg({ username: 'binh01', email: 'b@test.vn', password: '123456', phone: '12345' }).expect(400);
+    const m = await reg({ username: 'binh01', email: 'b@test.vn', password: '123456', confirmPassword: '654321' }).expect(400);
+    assert.equal(m.body.error, 'password_mismatch');
   });
   test('Dang nhap dung / sai mat khau', async () => {
     const ok = await api().post('/api/auth/login').send({ email: 'an@test.vn', password: '123456' }).expect(200);
@@ -79,7 +90,7 @@ describe('Xac thuc', () => {
     assert.equal(bad.body.error, 'invalid_credentials');
     const admin = await api().post('/api/auth/login').send({ email: 'admin@test.vn', password: 'admin123' }).expect(200);
     adminToken = admin.body.token;
-    const u2 = await api().post('/api/auth/register').send({ email: 'binh@test.vn', password: '123456', fullName: 'Binh' });
+    const u2 = await api().post('/api/auth/register').send({ username: 'binh', email: 'binh@test.vn', password: '123456' });
     user2Token = u2.body.token;
   });
   test('GET /me can token hop le', async () => {
@@ -87,6 +98,54 @@ describe('Xac thuc', () => {
     await api().get('/api/auth/me').set(auth('abc.def.ghi')).expect(401);
     const r = await api().get('/api/auth/me').set(auth(userToken)).expect(200);
     assert.equal(r.body.fullName, 'Nguyen Van An');
+  });
+});
+
+describe('OTP: dang nhap ten + SDT, tim ID, quen mat khau', () => {
+  const otp = (b) => api().post('/api/auth/otp').send(b);
+
+  test('Dang nhap bang ten + SDT qua OTP', async () => {
+    const o = await otp({ purpose: 'login_phone', username: 'An_Nguyen', phone: '0901 234 567' }).expect(201);
+    assert.match(o.body.devCode, /^\d{6}$/);
+    assert.equal(o.body.sentTo, '090****567');
+    const wrong = o.body.devCode === '000000' ? '111111' : '000000';
+    const bad = await api().post('/api/auth/login/phone').send({ otpId: o.body.otpId, code: wrong }).expect(400);
+    assert.equal(bad.body.error, 'otp_wrong');
+    assert.equal(bad.body.details.attemptsLeft, 4);
+    const ok = await api().post('/api/auth/login/phone').send({ otpId: o.body.otpId, code: o.body.devCode }).expect(200);
+    assert.equal(ok.body.user.username, 'an_nguyen');
+    assert.ok(ok.body.token);
+    // ma da dung khong dung lai duoc
+    await api().post('/api/auth/login/phone').send({ otpId: o.body.otpId, code: o.body.devCode }).expect(400);
+  });
+  test('Gui lai ma qua nhanh -> 429; sai ten/SDT -> 404', async () => {
+    const r = await otp({ purpose: 'login_phone', username: 'an_nguyen', phone: '0901234567' }).expect(429);
+    assert.equal(r.body.error, 'otp_too_soon');
+    await otp({ purpose: 'login_phone', username: 'an_nguyen', phone: '0999999999' }).expect(404);
+    await otp({ purpose: 'xyz', username: 'an_nguyen', phone: '0901234567' }).expect(400);
+  });
+  test('Tim ID (email)', async () => {
+    const o = await otp({ purpose: 'find_id', username: 'an_nguyen', phone: '0901234567' }).expect(201);
+    const r = await api().post('/api/auth/find-id').send({ otpId: o.body.otpId, code: o.body.devCode }).expect(200);
+    assert.equal(r.body.email, 'an@test.vn');
+    assert.equal(r.body.maskedEmail, 'an***@test.vn');
+    // OTP cua find_id khong dung de dang nhap duoc
+    await api().post('/api/auth/login/phone').send({ otpId: o.body.otpId, code: o.body.devCode }).expect(400);
+  });
+  test('Quen mat khau -> dat lai -> dang nhap bang mat khau moi', async () => {
+    const o = await otp({ purpose: 'reset_password', email: 'an@test.vn' }).expect(201);
+    await api().post('/api/auth/reset-password')
+      .send({ otpId: o.body.otpId, code: o.body.devCode, newPassword: 'moi123', confirmPassword: 'khac' }).expect(400);
+    await api().post('/api/auth/reset-password')
+      .send({ otpId: o.body.otpId, code: o.body.devCode, newPassword: 'moi123' }).expect(200);
+    await api().post('/api/auth/login').send({ email: 'an@test.vn', password: '123456' }).expect(401);
+    const l = await api().post('/api/auth/login').send({ email: 'an@test.vn', password: 'moi123' }).expect(200);
+    userToken = l.body.token;
+    await otp({ purpose: 'reset_password', email: 'khongco@test.vn' }).expect(404);
+  });
+  test('Cap nhat SDT cho tai khoan', async () => {
+    const r = await api().patch('/api/auth/me').set(auth(user2Token)).send({ phone: '0912345678' }).expect(200);
+    assert.equal(r.body.phone, '0912345678');
   });
 });
 

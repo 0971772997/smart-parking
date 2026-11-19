@@ -1,6 +1,6 @@
 // Chuyen dong DB (snake_case) -> JSON tra ve cho app (camelCase)
 const user = (u) => u && ({
-  id: u.id, email: u.email, fullName: u.full_name, phone: u.phone, role: u.role, createdAt: u.created_at,
+  id: u.id, username: u.username, email: u.email, fullName: u.full_name, phone: u.phone, role: u.role, createdAt: u.created_at,
 });
 
 const vehicle = (v) => v && ({
