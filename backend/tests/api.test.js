@@ -11,6 +11,7 @@ const { createAuth } = require('../src/auth');
 const { createSync } = require('../src/sync');
 const { createApp } = require('../src/app');
 const { createFakeDevice } = require('./fakeDevice');
+const { createSocialVerifier } = require('../src/social');
 
 if (!/ep-lucky-mountain/.test(config.databaseUrl) && !process.env.ALLOW_ANY_TEST_DB) {
   throw new Error('Test phai chay tren nhanh DB "test" (.env.test) - dung lai de tranh xoa DB that');
@@ -32,7 +33,23 @@ before(async () => {
     [await bcrypt.hash('admin123', 4)]);
   device = createFakeDevice(4);
   sync = createSync(db);
-  app = createApp({ db, auth: createAuth(config), device });
+  // Google / Facebook gia lap: token -> phan hoi cua API that
+  const fakeFetch = async (url) => {
+    const token = decodeURIComponent(new URL(url).searchParams.get('id_token') || new URL(url).searchParams.get('access_token'));
+    const ok = (data) => ({ ok: true, json: async () => data });
+    const bad = { ok: false, json: async () => ({ error: 'invalid' }) };
+    if (url.includes('googleapis')) {
+      if (token === 'g-good-new') return ok({ sub: 'g-111', aud: 'test-client', iss: 'https://accounts.google.com', email: 'google.user@gmail.com', email_verified: 'true', name: 'Nguyễn Văn Gờ', picture: 'http://img/g.png' });
+      if (token === 'g-good-link') return ok({ sub: 'g-222', aud: 'test-client', iss: 'accounts.google.com', email: 'an@test.vn', email_verified: 'true', name: 'An' });
+      if (token === 'g-other-app') return ok({ sub: 'g-333', aud: 'app-khac', iss: 'accounts.google.com', email: 'x@gmail.com', email_verified: 'true' });
+      return bad;
+    }
+    if (url.includes('graph.facebook.com/app')) return token.startsWith('fb-good') ? ok({ id: '999' }) : ok({ id: '123' });
+    if (url.includes('graph.facebook.com/me')) return token === 'fb-good-noemail' ? ok({ id: 'fb-777', name: 'Fb User' }) : bad;
+    return bad;
+  };
+  const social = createSocialVerifier({ googleClientIds: ['test-client'], facebookAppId: '999', fetchFn: fakeFetch });
+  app = createApp({ db, auth: createAuth(config), device, social });
 });
 
 after(async () => db && db.end());
@@ -146,6 +163,39 @@ describe('OTP: dang nhap ten + SDT, tim ID, quen mat khau', () => {
   test('Cap nhat SDT cho tai khoan', async () => {
     const r = await api().patch('/api/auth/me').set(auth(user2Token)).send({ phone: '0912345678' }).expect(200);
     assert.equal(r.body.phone, '0912345678');
+  });
+});
+
+describe('Dang nhap Google / Facebook', () => {
+  const social = (b) => api().post('/api/auth/social').send(b);
+  test('Google lan dau -> tao tai khoan moi; lan sau -> cung tai khoan', async () => {
+    const r = await social({ provider: 'google', token: 'g-good-new' }).expect(200);
+    assert.equal(r.body.isNew, true);
+    assert.equal(r.body.user.email, 'google.user@gmail.com');
+    assert.equal(r.body.user.username, 'google.user');
+    assert.equal(r.body.user.linked.google, true);
+    const r2 = await social({ provider: 'google', token: 'g-good-new' }).expect(200);
+    assert.equal(r2.body.isNew, false);
+    assert.equal(r2.body.user.id, r.body.user.id);
+  });
+  test('Google trung email tai khoan co san -> lien ket, khong tao moi', async () => {
+    const r = await social({ provider: 'google', token: 'g-good-link' }).expect(200);
+    assert.equal(r.body.isNew, false);
+    assert.equal(r.body.user.username, 'an_nguyen');
+    assert.equal(r.body.user.linked.google, true);
+  });
+  test('Token sai / cua app khac -> 401', async () => {
+    const a = await social({ provider: 'google', token: 'g-bad-token' }).expect(401);
+    assert.equal(a.body.error, 'social_token_invalid');
+    await social({ provider: 'google', token: 'g-other-app' }).expect(401);
+    await social({ provider: 'facebook', token: 'fb-of-other-app' }).expect(401);
+    await social({ provider: 'twitter', token: 'xxxxxxxxxxxx' }).expect(400);
+  });
+  test('Facebook khong co email -> tao tai khoan voi email tam', async () => {
+    const r = await social({ provider: 'facebook', token: 'fb-good-noemail' }).expect(200);
+    assert.equal(r.body.isNew, true);
+    assert.equal(r.body.user.linked.facebook, true);
+    assert.match(r.body.user.email, /^facebook_fb-777@users\.smartpark\.local$/);
   });
 });
 
@@ -309,9 +359,13 @@ describe('Quan tri', () => {
   });
   test('Thong ke trong ngay', async () => {
     const r = await api().get(`/api/lots/${LOT}/stats`).set(auth(adminToken)).expect(200);
-    assert.equal(r.body.sessions, 2);
-    assert.equal(r.body.completedSessions, 1);
-    assert.equal(r.body.revenue, 20000);
+    // Luot do o 3 bat dau 61 phut truoc -> neu chay test trong khoang 00:00-01:01 (gio VN)
+    // thi luot do thuoc ngay hom qua, khong tinh vao thong ke hom nay.
+    const vnDate = (ms) => new Date(ms + 7 * 3600 * 1000).toISOString().slice(0, 10);
+    const sameDay = vnDate(Date.now() - 61 * 60 * 1000) === vnDate(Date.now());
+    assert.equal(r.body.sessions, sameDay ? 2 : 1);
+    assert.equal(r.body.completedSessions, sameDay ? 1 : 0);
+    assert.equal(r.body.revenue, sameDay ? 20000 : 0);
     assert.equal(r.body.reservations.fulfilled, 1);
     assert.equal(r.body.reservations.expired, 1);
     assert.equal(r.body.occupancyRate, 25);

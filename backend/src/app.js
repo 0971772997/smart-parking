@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const { HttpError } = require('./errors');
 
-function createApp({ db, auth, device, otpDevMode = true }) {
+function createApp({ db, auth, device, otpDevMode = true, social }) {
   const app = express();
   app.disable('x-powered-by');
   app.use(cors());
@@ -13,7 +13,7 @@ function createApp({ db, auth, device, otpDevMode = true }) {
     res.json({ ok: true, mqtt: device.connected ? device.connected() : null, time: new Date().toISOString() });
   });
 
-  app.use('/api/auth', require('./routes/auth')({ db, auth, otpDevMode }));
+  app.use('/api/auth', require('./routes/auth')({ db, auth, otpDevMode, social }));
   app.use('/api/vehicles', require('./routes/vehicles')({ db, auth }));
   app.use('/api/lots', require('./routes/lots')({ db, auth, device }));
   app.use('/api/reservations', require('./routes/reservations')({ db, auth, device }));

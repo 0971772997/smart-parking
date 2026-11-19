@@ -19,6 +19,10 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(30);
 ALTER TABLE users ALTER COLUMN full_name DROP NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_users_username ON users (lower(username));
 CREATE INDEX IF NOT EXISTS idx_users_phone ON users (phone);
+-- v3: dang nhap Google / Facebook
+ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR(64) UNIQUE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS facebook_id VARCHAR(64) UNIQUE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(500);
 
 -- Ma OTP (gia lap SMS): dang nhap bang ten + SDT, tim ID, dat lai mat khau
 CREATE TABLE IF NOT EXISTS otp_codes (

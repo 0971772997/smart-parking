@@ -25,6 +25,11 @@ module.exports = {
     topicPrefix: process.env.MQTT_TOPIC_PREFIX || 'smartparking',
   },
   otpDevMode: process.env.OTP_DEV_MODE !== 'false',   // tra ma OTP ve app (chua co SMS)
+  social: {
+    // Danh sach OAuth client ID cua Google (web, android, ios), cach nhau boi dau phay
+    googleClientIds: (process.env.GOOGLE_CLIENT_IDS || '').split(',').map((s) => s.trim()).filter(Boolean),
+    facebookAppId: process.env.FACEBOOK_APP_ID || undefined,
+  },
   deviceTimeoutMs: Number(process.env.DEVICE_TIMEOUT_MS) || 8000,
   admin: {
     email: process.env.ADMIN_EMAIL,

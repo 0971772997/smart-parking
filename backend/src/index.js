@@ -5,6 +5,7 @@ const { createAuth } = require('./auth');
 const { createSync } = require('./sync');
 const { createMqttBridge } = require('./mqttBridge');
 const { createApp } = require('./app');
+const { createSocialVerifier } = require('./social');
 
 async function ensureAdmin(db) {
   const { email, password } = config.admin;
@@ -23,7 +24,8 @@ async function main() {
 
   const sync = createSync(db);
   const device = createMqttBridge(config.mqtt, sync, { timeoutMs: config.deviceTimeoutMs });
-  const app = createApp({ db, auth: createAuth(config), device, otpDevMode: config.otpDevMode });
+  const app = createApp({ db, auth: createAuth(config), device, otpDevMode: config.otpDevMode,
+    social: createSocialVerifier(config.social) });
 
   const server = app.listen(config.port, () => console.log(`[API] Dang chay tai cong ${config.port}`));
 

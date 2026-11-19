@@ -25,7 +25,7 @@ function phone(body, key = 'phone', { optional = false } = {}) {
 const maskEmail = (e) => e.replace(/^(.{2})[^@]*(@.*)$/, (_, a, b) => `${a}***${b}`);
 const maskPhone = (p) => (p ? p.slice(0, 3) + '****' + p.slice(-3) : null);
 
-module.exports = function authRoutes({ db, auth, otpDevMode = true }) {
+module.exports = function authRoutes({ db, auth, otpDevMode = true, social }) {
   const r = express.Router();
   const otp = createOtpService(db, { devMode: otpDevMode });
 
@@ -61,6 +61,47 @@ module.exports = function authRoutes({ db, auth, otpDevMode = true }) {
       throw new HttpError(401, 'invalid_credentials', 'Sai email hoac mat khau');
     }
     res.json({ token: auth.sign(u), user: map.user(u) });
+  }));
+
+  // ---------- Dang nhap Google / Facebook ----------
+  // body: { provider: 'google', token: <idToken> } | { provider: 'facebook', token: <accessToken> }
+  r.post('/social', wrap(async (req, res) => {
+    if (!social) throw new HttpError(503, 'social_not_configured', 'Dang nhap mang xa hoi chua duoc cau hinh');
+    const provider = req.body?.provider;
+    const profile = await social.verify(provider, req.body?.token);
+    const col = provider === 'google' ? 'google_id' : 'facebook_id';
+
+    // 1. Da tung dang nhap bang tai khoan nay
+    let u = await db.one(`SELECT * FROM users WHERE ${col} = $1`, [profile.providerId]);
+    let isNew = false;
+    // 2. Trung email voi tai khoan da co -> lien ket
+    if (!u && profile.email) {
+      u = await db.one(
+        `UPDATE users SET ${col} = $2, avatar_url = COALESCE(avatar_url, $3) WHERE email = $1 RETURNING *`,
+        [profile.email.toLowerCase(), profile.providerId, profile.avatar || null]);
+    }
+    // 3. Tao tai khoan moi
+    if (!u) {
+      const email = (profile.email || `${provider}_${profile.providerId}@users.smartpark.local`).toLowerCase();
+      const base = ((profile.email || '').split('@')[0] || (profile.name || provider))
+        .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/gi, 'd')
+        .toLowerCase().replace(/[^a-z0-9_.]/g, '').slice(0, 20).padEnd(4, '0');
+      const hash = await bcrypt.hash(require('crypto').randomBytes(24).toString('hex'), 10);
+      for (let i = 0; i < 5 && !u; i++) {
+        const username = i === 0 ? base : `${base}${Math.floor(1000 + Math.random() * 9000)}`;
+        try {
+          u = await db.one(
+            `INSERT INTO users (username, email, password_hash, full_name, ${col}, avatar_url)
+             VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+            [username, email, hash, profile.name || null, profile.providerId, profile.avatar || null]);
+          isNew = true;
+        } catch (e) {
+          if (!(e.code === '23505' && /username/.test(e.constraint))) throw e;
+        }
+      }
+      if (!u) throw new HttpError(500, 'internal_error', 'Khong tao duoc ten dang nhap');
+    }
+    res.json({ token: auth.sign(u), user: map.user(u), isNew });
   }));
 
   // ---------- OTP ----------
