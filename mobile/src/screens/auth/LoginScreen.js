@@ -1,6 +1,6 @@
 // UI-001 LOGIN SCREEN
 // Form chinh: ID (email) + mat khau, Luu ID, Tu dong dang nhap
-// Lien ket: Tim ID, Quen mat khau, Dang ky
+// Lien ket: Quen mat khau, Dang ky. Dang nhap Google / Facebook
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
@@ -9,8 +9,10 @@ import Button from '../../components/Button';
 import Checkbox from '../../components/Checkbox';
 import Logo from '../../components/Logo';
 import Notice from '../../components/Notice';
+import SocialButtons from '../../components/SocialButtons';
 import TextField from '../../components/TextField';
 import { authApi } from '../../api/auth';
+import { getProviderToken, SocialUnavailableError } from '../../auth/social';
 import { useAuth } from '../../context/AuthContext';
 import { storage } from '../../storage';
 import { colors } from '../../theme';
@@ -28,6 +30,7 @@ export default function LoginScreen({ navigation, route }) {
   const [slow, setSlow] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+  const [hint, setHint] = useState('');
   const [errs, setErrs] = useState({});
   const passRef = useRef(null);
 
@@ -49,6 +52,21 @@ export default function LoginScreen({ navigation, route }) {
 
   const edit = (setter, key) => (t) => { setter(t); if (errs[key]) setErrs((e) => ({ ...e, [key]: undefined })); };
 
+  async function onSocial(provider) {
+    setError(''); setInfo(''); setHint('');
+    try {
+      const token = await getProviderToken(provider);
+      if (!token) return; // nguoi dung huy
+      const res = await authApi.social(provider, token);
+      await storage.setAutoLogin(autoLogin);
+      await signIn(res, { remember: autoLogin });
+      navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+    } catch (err) {
+      if (err instanceof SocialUnavailableError) setHint(err.message);
+      else setError(err.message);
+    }
+  }
+
   async function onLogin() {
     const e = {};
     if (!isEmail(email)) e.email = 'Vui lòng nhập email hợp lệ';
@@ -57,7 +75,7 @@ export default function LoginScreen({ navigation, route }) {
     if (Object.keys(e).length) return;
 
     const id = email.trim().toLowerCase();
-    setError(''); setInfo(''); setBusy(true); setSlow(false);
+    setError(''); setInfo(''); setHint(''); setBusy(true); setSlow(false);
     try {
       const res = await authApi.login(id, password, { onSlow: () => setSlow(true) });
       await storage.setLoginPrefs({ saveId, autoLogin, email: id });
@@ -90,6 +108,7 @@ export default function LoginScreen({ navigation, route }) {
 
       <Notice type="success">{info}</Notice>
       <Notice type="error">{error}</Notice>
+      <Notice type="info">{hint}</Notice>
       {busy && slow ? <Notice type="info">{SLOW_MSG}</Notice> : null}
 
       <TextField
@@ -130,10 +149,6 @@ export default function LoginScreen({ navigation, route }) {
       <Button title="Đăng nhập" onPress={onLogin} loading={busy} testID="login-submit" />
 
       <View style={[styles.row, styles.links]}>
-        <Pressable onPress={() => navigation.navigate('FindId')} hitSlop={8} accessibilityRole="link">
-          <Text style={styles.linkMuted}>Tìm ID</Text>
-        </Pressable>
-        <View style={styles.sep} />
         <Pressable
           onPress={() => navigation.navigate('FindPassword', { email: isEmail(email) ? email.trim() : '' })}
           hitSlop={8}
@@ -142,6 +157,8 @@ export default function LoginScreen({ navigation, route }) {
           <Text style={styles.linkMuted}>Quên mật khẩu</Text>
         </Pressable>
       </View>
+
+      <SocialButtons onPress={onSocial} disabled={busy} />
     </AuthLayout>
   );
 }
@@ -153,7 +170,6 @@ const styles = StyleSheet.create({
   options: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 2, marginBottom: 20 },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
   links: { gap: 16, marginTop: 20 },
-  sep: { width: 1, height: 14, backgroundColor: colors.border },
   linkMuted: { fontSize: 14, fontWeight: '600', color: colors.textMuted },
   muted: { fontSize: 14, color: colors.textMuted },
   link: { fontSize: 14, fontWeight: '700', color: colors.primary },

@@ -17,6 +17,8 @@ const MESSAGES = {
   password_mismatch: 'Mật khẩu xác nhận không khớp.',
   email_taken: 'Email đã được đăng ký.',
   username_taken: 'Tên đăng nhập đã tồn tại.',
+  social_not_configured: 'Đăng nhập mạng xã hội chưa được cấu hình trên máy chủ.',
+  social_token_invalid: 'Không xác minh được tài khoản mạng xã hội. Vui lòng thử lại.',
   internal_error: 'Máy chủ gặp sự cố. Vui lòng thử lại sau.',
 };
 
