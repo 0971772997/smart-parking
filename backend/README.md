@@ -16,6 +16,23 @@ Node.js + Express · PostgreSQL (Neon) · MQTT (HiveMQ Cloud) · Deploy Render (
 - API **subscribe** `smartparking/+/status|event|online`, rồi lưu vào DB. Chỉ ghi DB khi dữ liệu thay đổi.
 - Khi app đặt chỗ, API **publish** lệnh lên `smartparking/{lotId}/cmd` kèm `requestId`, rồi chờ ESP32 trả `ack` (tối đa 8 giây).
 
+**Bản đang chạy:** https://smart-parking-api-2ro3.onrender.com/api/health
+
+## 0. Cấu hình Broker
+
+| Thông số | Giá trị |
+|---|---|
+| Broker | `broker.hivemq.com` (công khai, miễn phí). HiveMQ Cloud đã bỏ gói free |
+| Cổng | TCP `1883` (ESP32, API) · WebSocket `8000` path `/mqtt` (app/web) · WSS `8884` |
+| Topic | `smartparking/{lotId}/status` (retained) · `event` · `cmd` · `online` (retained + LWT) |
+| QoS | Lệnh `cmd` gửi với QoS 1; ESP32 subscribe `cmd` với QoS 1 |
+| LWT | Khi ESP32 kết nối, nó khai báo LWT `online = "0"` (retained). Nếu ESP32 mất kết nối, broker tự gửi `"0"` → API chuyển bãi sang offline và trả `503 device_offline` |
+| Giữ kết nối | ESP32 tự kết nối lại sau 5 giây; API tự kết nối lại sau 3 giây |
+
+Đổi sang broker riêng có TLS (HiveMQ Cloud / EMQX) không cần sửa code:
+- Firmware: khai báo `MQTT_HOST_CFG`, `MQTT_PORT_CFG 8883`, `MQTT_USER_CFG`, `MQTT_PASS_CFG` trong `config.h`. Firmware đã nhúng sẵn chứng chỉ gốc ISRG Root X1.
+- API: đặt `MQTT_URL=mqtts://host:8883`, `MQTT_USERNAME`, `MQTT_PASSWORD`.
+
 ## 1. Thiết kế DB (`db/schema.sql`)
 
 | Bảng | Nội dung | Khóa / ràng buộc chính |
@@ -87,3 +104,23 @@ node scripts/e2e.js http://localhost:3000 <admin-email> <admin-pass>   # test th
 ```
 
 Biến môi trường được mô tả trong `.env.example`.
+
+### Kết quả test (19/11/2026)
+
+| Loại test | Môi trường | Kết quả |
+|---|---|---|
+| Test tự động (`npm test`) | Nhánh DB Neon `test`, ESP32 giả lập | **28/28 PASS** |
+| End-to-end (`scripts/e2e.js`) | API trên máy + ESP32 trên Wokwi + broker | **11/11 PASS** |
+| End-to-end | **API trên Render** + Neon + ESP32 trên Wokwi | **11/11 PASS**, ESP32 phản hồi đặt chỗ trong khoảng 0,6 giây |
+| Mất kết nối | Tắt ESP32 → khoảng 15 giây sau gọi đặt chỗ | `503 device_offline` trả về trong 181 ms |
+
+## 4. Deploy Cloud (Render, gói Free)
+
+1. Code nằm trên GitHub (repo private). `render.yaml` ở thư mục gốc khai báo service `smart-parking-api` (Node, khu vực Singapore, health check `/api/health`).
+2. Trên Render: **New → Blueprint** → chọn repo. Chỉ cần điền `DATABASE_URL` (chuỗi kết nối pooled của Neon). `JWT_SECRET` do Render tự sinh.
+3. Mỗi lần `git push` lên nhánh `main`, Render tự build và deploy lại. Khi khởi động, server tự chạy migrate.
+4. Tạo hoặc đổi mật khẩu admin từ máy: `npm run set-admin -- <email> <mat-khau>`.
+
+Giới hạn của gói Free:
+- Render "ngủ" sau 15 phút không có request, request đầu tiên sau đó mất khoảng 50 giây để server thức dậy. Khi thức dậy, server tự đồng bộ lại từ bản tin `status` retained. Có thể dùng cron-job.org gọi `/api/health` mỗi 10 phút để giữ server luôn thức.
+- Neon tự ngủ sau 5 phút không có truy vấn. API chỉ ghi DB khi dữ liệu thay đổi, nên DB không bị đánh thức liên tục.
