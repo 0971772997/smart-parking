@@ -227,6 +227,10 @@ describe('Dong bo tu ESP32 (MQTT -> DB)', () => {
     await sync.handleOnline(LOT, '0');
     const lot = await api().get(`/api/lots/${LOT}`).expect(200);
     assert.equal(lot.body.online, false);
+    // status "retained" cu den sau khi thiet bi da mat ket noi -> van phai offline
+    await sync.handleStatus(LOT, { fw: '1.2.0', gates: { entry: 'closed', exit: 'closed' }, slots: [] });
+    const lot2 = await api().get(`/api/lots/${LOT}`).expect(200);
+    assert.equal(lot2.body.online, false);
     await sync.handleOnline(LOT, '1');
   });
   test('Su kien la ghi vao nhat ky; bai la bi bo qua', async () => {

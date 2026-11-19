@@ -41,6 +41,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const resv = await call('POST', `/api/lots/${LOT}/reservations`, { slotNumber: free.slotNumber, minutes: 5 }, token);
   check(`dat o ${free.slotNumber} -> ESP32 ack (${Date.now() - t0} ms)`, resv.status === 201 && resv.body.status === 'active', resv.body);
 
+  if (resv.status !== 201) {
+    console.log(`\nDung: dat cho that bai (ESP32 co dang chay khong?). KET QUA E2E: ${pass}/${pass + fail + 4} PASS`);
+    process.exit(1);
+  }
   await sleep(1500);
   const after = await call('GET', `/api/lots/${LOT}`);
   check('o chuyen sang reserved trong DB', after.body.slots[free.slotNumber - 1].state === 'reserved');

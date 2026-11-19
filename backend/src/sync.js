@@ -76,7 +76,9 @@ function createSync(db) {
     const changed = gates.entry !== c.gates.entry || gates.exit !== c.gates.exit || st.fw !== c.fw;
     if (changed || Date.now() - c.lastSeenWrite > LAST_SEEN_WRITE_MS) {
       await db.query(
-        `UPDATE parking_lots SET online = true, last_seen_at = now(),
+        // KHONG set online o day: status la ban tin "retained" nen co the la ban cu cua thiet bi da tat.
+        // Trang thai online/offline chi lay tu topic 'online' (ESP32 gui "1", LWT tu gui "0").
+        `UPDATE parking_lots SET last_seen_at = now(),
            entry_gate = COALESCE($2, entry_gate), exit_gate = COALESCE($3, exit_gate),
            fw_version = COALESCE($4, fw_version)
          WHERE id = $1`,
