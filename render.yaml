@@ -1,0 +1,36 @@
+# Render Blueprint - deploy API bai do xe (goi Free)
+# Render Dashboard -> New -> Blueprint -> chon repo nay
+services:
+  - type: web
+    name: smart-parking-api
+    runtime: node
+    plan: free
+    region: singapore
+    rootDir: backend
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true          # Render tu sinh chuoi ngau nhien
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: MQTT_TOPIC_PREFIX
+        value: smartparking
+      - key: DEVICE_TIMEOUT_MS
+        value: "8000"
+      # Cac bien bi mat: Render se hoi khi tao Blueprint
+      - key: DATABASE_URL
+        sync: false
+      - key: MQTT_URL
+        sync: false
+      - key: MQTT_USERNAME
+        sync: false
+      - key: MQTT_PASSWORD
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false

@@ -1,0 +1,12 @@
+# Bi mat - KHONG day len Git (dung file *.example.h / .env.example lam mau)
+arduino/SmartParking/config.h
+wokwi/config.h
+backend/.env
+backend/.env.local
+backend/.env.test
+backend/.neon
+.neon
+
+node_modules/
+build/
+*.zip

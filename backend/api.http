@@ -1,0 +1,89 @@
+### Test tay bang VS Code extension "REST Client" (bam "Send Request")
+@base = http://localhost:3000/api
+# @base = https://smart-parking-api.onrender.com/api
+
+### Health
+GET {{base}}/health
+
+### Dang ky
+# @name reg
+POST {{base}}/auth/register
+Content-Type: application/json
+
+{ "email": "an@test.vn", "password": "123456", "fullName": "Nguyen Van An", "phone": "0901234567" }
+
+### Dang nhap
+# @name login
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{ "email": "an@test.vn", "password": "123456" }
+
+###
+@token = {{login.response.body.token}}
+
+### Toi la ai
+GET {{base}}/auth/me
+Authorization: Bearer {{token}}
+
+### Them xe
+POST {{base}}/vehicles
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "plateNumber": "51A-123.45", "brand": "Toyota", "color": "Trang" }
+
+### Danh sach bai do
+GET {{base}}/lots
+
+### Chi tiet bai
+GET {{base}}/lots/sp-demo-01
+
+### Dat cho o 2 trong 15 phut
+# @name resv
+POST {{base}}/lots/sp-demo-01/reservations
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "slotNumber": 2, "minutes": 15 }
+
+### Gia han 10 phut
+POST {{base}}/reservations/{{resv.response.body.id}}/extend
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "minutes": 10 }
+
+### Huy dat cho
+DELETE {{base}}/reservations/{{resv.response.body.id}}
+Authorization: Bearer {{token}}
+
+### Lich su dat cho cua toi
+GET {{base}}/reservations
+Authorization: Bearer {{token}}
+
+### ===== ADMIN =====
+# @name admin
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{ "email": "admin@smartparking.vn", "password": "MAT_KHAU_ADMIN" }
+
+###
+@adminToken = {{admin.response.body.token}}
+
+### Mo barie vao
+POST {{base}}/lots/sp-demo-01/gates/entry/open
+Authorization: Bearer {{adminToken}}
+
+### Thong ke hom nay
+GET {{base}}/lots/sp-demo-01/stats
+Authorization: Bearer {{adminToken}}
+
+### Luot do
+GET {{base}}/lots/sp-demo-01/sessions
+Authorization: Bearer {{adminToken}}
+
+### Nhat ky su kien
+GET {{base}}/lots/sp-demo-01/events?limit=20
+Authorization: Bearer {{adminToken}}

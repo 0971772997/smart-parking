@@ -1,0 +1,6 @@
+# Wokwi Library List
+LiquidCrystal I2C
+ESP32Servo
+Adafruit NeoPixel
+PubSubClient
+ArduinoJson
