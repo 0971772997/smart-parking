@@ -28,7 +28,4 @@ services:
       # them MQTT_USERNAME / MQTT_PASSWORD va doi MQTT_URL thanh mqtts://...:8883
       - key: MQTT_URL
         value: mqtt://broker.hivemq.com:1883
-      - key: ADMIN_EMAIL
-        value: admin@smartparking.vn
-      - key: ADMIN_PASSWORD
-        sync: false
+      # Tai khoan admin: tao/doi mat khau tu may bang `npm run set-admin` (khong luu tren Render)
