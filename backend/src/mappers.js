@@ -29,8 +29,8 @@ const session = (s) => s && ({
   endedAt: s.ended_at, durationSeconds: s.duration_seconds, fee: s.fee,
 });
 
-const driverRoute = (d) => d && ({
-  id: d.id, name: d.name, origin: d.origin, lotId: d.lot_id, vehicleId: d.vehicle_id, departTime: d.depart_time,
+const schedule = (d) => d && ({
+  id: d.id, name: d.name, lotId: d.lot_id, vehicleId: d.vehicle_id, arriveTime: d.arrive_time,
   days: (d.days || []).map(Number), minutes: d.minutes, note: d.note, active: d.active,
   lot: d.lot_name === undefined ? undefined : {
     name: d.lot_name, address: d.lot_address, pricePerHour: d.lot_price_per_hour, online: d.lot_online,
@@ -39,4 +39,4 @@ const driverRoute = (d) => d && ({
   vehiclePlate: d.vehicle_plate ?? null, createdAt: d.created_at, updatedAt: d.updated_at,
 });
 
-module.exports = { user, vehicle, lot, slot, reservation, session, driverRoute };
+module.exports = { user, vehicle, lot, slot, reservation, session, schedule };

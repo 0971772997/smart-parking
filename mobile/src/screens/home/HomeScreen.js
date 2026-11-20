@@ -21,9 +21,9 @@ import { useAuth } from '../../context/AuthContext';
 import { lotsApi } from '../../api/lots';
 import { reservationsApi } from '../../api/reservations';
 import { vehiclesApi } from '../../api/vehicles';
-import { routesApi } from '../../api/routes';
+import { schedulesApi } from '../../api/schedules';
 import { colors, radius, shadow } from '../../theme';
-import { formatDuration, nextDeparture } from '../../utils/routes';
+import { formatDuration, nextArrival } from '../../utils/schedules';
 import { useFocusEffect } from '@react-navigation/native';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -79,7 +79,7 @@ export default function HomeScreen({ navigation }) {
   const [lots, setLots] = useState([]);
   const [reservations, setReservations] = useState([]);
   const [vehicles, setVehicles] = useState([]);
-  const [routes, setRoutes] = useState([]);
+  const [schedules, setSchedules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [expandedLotId, setExpandedLotId] = useState(null); // bai dang mo so do o
@@ -94,17 +94,17 @@ export default function HomeScreen({ navigation }) {
     if (!isSilent) setLoading(true);
     const lotId = expandedRef.current;
     try {
-      const [lotsRes, resvRes, vehRes, routesRes, detailRes] = await Promise.allSettled([
+      const [lotsRes, resvRes, vehRes, schedRes, detailRes] = await Promise.allSettled([
         lotsApi.list(),
         reservationsApi.list(),
         vehiclesApi.list(),
-        routesApi.list(),
+        schedulesApi.list(),
         lotId ? lotsApi.detail(lotId) : Promise.resolve(null),
       ]);
       if (lotsRes.status === 'fulfilled') setLots(lotsRes.value || []);
       if (resvRes.status === 'fulfilled') setReservations(resvRes.value || []);
       if (vehRes.status === 'fulfilled') setVehicles(vehRes.value || []);
-      if (routesRes.status === 'fulfilled') setRoutes(routesRes.value || []);
+      if (schedRes.status === 'fulfilled') setSchedules(schedRes.value || []);
       // Bỏ qua kết quả nếu người dùng đã đóng / đổi bãi trong lúc đang tải
       if (lotId && detailRes.status === 'fulfilled' && expandedRef.current === lotId) setSelectedLotDetail(detailRes.value);
     } catch {
@@ -121,7 +121,7 @@ export default function HomeScreen({ navigation }) {
   }, [loadData, fadeAnim]);
 
   // Tự đồng bộ mỗi 10s, chỉ khi màn hình đang hiển thị (sang màn khác thì dừng);
-  // quay lại từ màn Lộ trình (có thể vừa đặt chỗ / sửa) -> làm mới ngay
+  // quay lại từ màn Lịch gửi xe (có thể vừa đặt chỗ / sửa) -> làm mới ngay
   const firstFocus = useRef(true);
   useFocusEffect(useCallback(() => {
     if (firstFocus.current) firstFocus.current = false;
@@ -228,7 +228,7 @@ export default function HomeScreen({ navigation }) {
           )}
 
           {/* LOI TAT: LO TRINH CUA TOI */}
-          <RoutesShortcut routes={routes} onPress={() => navigation.navigate('Routes')} />
+          <SchedulesShortcut schedules={schedules} onPress={() => navigation.navigate('Schedules')} />
 
           {/* CLEAN NAVIGATION TABS */}
           <View style={styles.tabContainer}>
@@ -336,32 +336,32 @@ function CompactSummaryCard({ summary, vehiclesCount }) {
   );
 }
 
-/** Lối tắt tới màn Lộ trình: hiện chuyến sắp tới gần nhất */
-function RoutesShortcut({ routes, onPress }) {
+/** Lối tắt tới màn Lịch gửi xe: hiện lần gửi xe sắp tới gần nhất */
+function SchedulesShortcut({ schedules, onPress }) {
   const upcoming = useMemo(() => {
     let best = null;
-    routes.forEach((r) => {
+    schedules.forEach((r) => {
       if (!r.active) return;
-      const n = nextDeparture(r);
-      if (n && (!best || n.date < best.next.date)) best = { route: r, next: n };
+      const n = nextArrival(r);
+      if (n && (!best || n.date < best.next.date)) best = { schedule: r, next: n };
     });
     return best;
-  }, [routes]);
+  }, [schedules]);
 
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.routeShortcut, pressed && styles.btnPressed]}
-      accessibilityRole="button" accessibilityLabel="Mở lộ trình của tôi">
+      accessibilityRole="button" accessibilityLabel="Mở lịch gửi xe">
       <View style={styles.routeShortcutIcon}>
-        <Ionicons name="git-branch-outline" size={20} color={colors.primary} />
+        <Ionicons name="calendar-outline" size={20} color={colors.primary} />
       </View>
       <View style={{ flex: 1 }}>
         <Text style={styles.routeShortcutTitle}>
-          Lộ trình của tôi{routes.length ? ` (${routes.length})` : ''}
+          Lịch gửi xe{schedules.length ? ` (${schedules.length})` : ''}
         </Text>
         <Text style={styles.routeShortcutSub} numberOfLines={1}>
           {upcoming
-            ? `${upcoming.route.name} • ${upcoming.next.inMinutes <= 180 ? `sau ${formatDuration(upcoming.next.inMinutes)}` : upcoming.next.label}`
-            : routes.length ? 'Không có chuyến nào sắp tới' : 'Lưu chuyến đi quen thuộc để đặt chỗ nhanh'}
+            ? `${upcoming.schedule.name} • ${upcoming.next.inMinutes <= 180 ? `sau ${formatDuration(upcoming.next.inMinutes)}` : upcoming.next.label}`
+            : schedules.length ? 'Không có lịch nào sắp tới' : 'Lưu thói quen gửi xe để đặt chỗ nhanh 1 chạm'}
         </Text>
       </View>
       <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
@@ -828,7 +828,7 @@ const styles = StyleSheet.create({
   ticketMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   ticketMetaText: { fontSize: 12, color: colors.textMuted },
 
-  // Lối tắt Lộ trình
+  // Lối tắt Lịch gửi xe
   routeShortcut: {
     flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FFFFFF', borderRadius: radius.md,
     padding: 12, marginBottom: 16, borderWidth: 1, borderColor: '#E2E8F0',

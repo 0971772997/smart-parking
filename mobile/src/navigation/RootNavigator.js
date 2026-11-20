@@ -4,8 +4,8 @@ import LoginScreen from '../screens/auth/LoginScreen';
 import FindPasswordScreen from '../screens/auth/FindPasswordScreen';
 import RegisterScreen from '../screens/auth/RegisterScreen';
 import HomeScreen from '../screens/home/HomeScreen';
-import RoutesScreen from '../screens/routes/RoutesScreen';
-import RouteFormScreen from '../screens/routes/RouteFormScreen';
+import SchedulesScreen from '../screens/schedules/SchedulesScreen';
+import ScheduleFormScreen from '../screens/schedules/ScheduleFormScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -17,8 +17,8 @@ export default function RootNavigator() {
       <Stack.Screen name="FindPassword" component={FindPasswordScreen} options={{ title: 'Quên mật khẩu' }} />
       <Stack.Screen name="Register" component={RegisterScreen} options={{ title: 'Đăng ký' }} />
       <Stack.Screen name="Home" component={HomeScreen} options={{ animation: 'fade', title: 'SmartPark' }} />
-      <Stack.Screen name="Routes" component={RoutesScreen} options={{ title: 'Lộ trình của tôi' }} />
-      <Stack.Screen name="RouteForm" component={RouteFormScreen} options={{ title: 'Lộ trình', animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="Schedules" component={SchedulesScreen} options={{ title: 'Lịch gửi xe' }} />
+      <Stack.Screen name="ScheduleForm" component={ScheduleFormScreen} options={{ title: 'Lịch gửi xe', animation: 'slide_from_bottom' }} />
     </Stack.Navigator>
   );
 }

@@ -1,8 +1,8 @@
-// UI-ROUTES: Lo trinh thuong di cua tai xe
-// - Danh sach lo trinh da dang ky, mo rong / thu gon de xem chi tiet
-// - Them / Sua (RouteForm) / Xoa (hop thoai xac nhan) / Bat-tat nhanh
+// LICH GUI XE: thoi quen gui xe cua tai xe (vd: Di lam - Bai Hai Chau luc 07:30, T2-T6)
+// - Danh sach lich da dang ky, mo rong / thu gon de xem chi tiet
+// - Them / Sua (ScheduleForm, UI-005) / Xoa (hop thoai xac nhan) / Bat-tat nhanh
 // - Loc: tim kiem, trang thai (Hom nay / Dang bat / Tam tat), theo bai do; sap xep
-// - Them cho app bai do: tinh trang o trong truc tiep cua bai dich + Dat cho nhanh theo lo trinh
+// - Tinh trang o trong truc tiep cua bai + Dat cho nhanh theo lich (giu cho dung xe, dung so phut)
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, View,
@@ -13,11 +13,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import Notice from '../../components/Notice';
-import { routesApi } from '../../api/routes';
+import { schedulesApi } from '../../api/schedules';
 import { lotsApi } from '../../api/lots';
 import { reservationsApi } from '../../api/reservations';
 import { colors, radius, shadow } from '../../theme';
-import { daysLabel, formatDuration, formatVND, isoDay, nextDeparture, WEEKDAYS } from '../../utils/routes';
+import { daysLabel, formatDuration, formatVND, isoDay, nextArrival, WEEKDAYS } from '../../utils/schedules';
 
 const STATUS_FILTERS = [
   { key: 'all', label: 'Tất cả' },
@@ -27,15 +27,15 @@ const STATUS_FILTERS = [
 ];
 
 const SORTS = [
-  { key: 'time', label: 'Giờ đi' },
-  { key: 'next', label: 'Sắp khởi hành' },
+  { key: 'time', label: 'Giờ gửi xe' },
+  { key: 'next', label: 'Sắp đến giờ' },
   { key: 'name', label: 'Tên A–Z' },
 ];
 
 const normalize = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/gi, 'd').toLowerCase();
 
-export default function RoutesScreen({ navigation, route }) {
-  const [routes, setRoutes] = useState([]);
+export default function SchedulesScreen({ navigation, route }) {
+  const [schedules, setSchedules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState('');
@@ -59,8 +59,8 @@ export default function RoutesScreen({ navigation, route }) {
 
   const load = useCallback(async () => {
     try {
-      const data = await routesApi.list();
-      setRoutes(data || []);
+      const data = await schedulesApi.list();
+      setSchedules(data || []);
       setLoadError('');
     } catch (e) {
       setLoadError(e.message);
@@ -92,55 +92,55 @@ export default function RoutesScreen({ navigation, route }) {
     return n;
   });
 
-  const allExpanded = routes.length > 0 && routes.every((r) => expanded.has(r.id));
-  const toggleAll = () => setExpanded(allExpanded ? new Set() : new Set(routes.map((r) => r.id)));
+  const allExpanded = schedules.length > 0 && schedules.every((r) => expanded.has(r.id));
+  const toggleAll = () => setExpanded(allExpanded ? new Set() : new Set(schedules.map((r) => r.id)));
 
   // Bai do co trong cac lo trinh -> chip loc
   const lotOptions = useMemo(() => {
     const m = new Map();
-    routes.forEach((r) => { if (!m.has(r.lotId)) m.set(r.lotId, r.lot?.name || r.lotId); });
+    schedules.forEach((r) => { if (!m.has(r.lotId)) m.set(r.lotId, r.lot?.name || r.lotId); });
     return [...m.entries()].map(([id, name]) => ({ id, name }));
-  }, [routes]);
+  }, [schedules]);
 
   const visible = useMemo(() => {
     const today = isoDay();
     const q = normalize(query.trim());
-    const list = routes.filter((r) => {
+    const list = schedules.filter((r) => {
       if (status === 'active' && !r.active) return false;
       if (status === 'paused' && r.active) return false;
       if (status === 'today' && !(r.active && r.days.includes(today))) return false;
       if (lotFilter && r.lotId !== lotFilter) return false;
-      if (q && ![r.name, r.origin, r.lot?.name, r.lot?.address, r.vehiclePlate, r.note].some((f) => normalize(f).includes(q))) return false;
+      if (q && ![r.name, r.lot?.name, r.lot?.address, r.vehiclePlate, r.note].some((f) => normalize(f).includes(q))) return false;
       return true;
     });
-    const next = (r) => (r.active ? nextDeparture(r)?.date?.getTime() ?? Infinity : Infinity);
+    const next = (r) => (r.active ? nextArrival(r)?.date?.getTime() ?? Infinity : Infinity);
     if (sort === 'name') list.sort((a, b) => a.name.localeCompare(b.name, 'vi'));
     else if (sort === 'next') list.sort((a, b) => next(a) - next(b));
-    else list.sort((a, b) => a.departTime.localeCompare(b.departTime));
+    else list.sort((a, b) => a.arriveTime.localeCompare(b.arriveTime));
     return list;
-  }, [routes, status, lotFilter, query, sort]);
+  }, [schedules, status, lotFilter, query, sort]);
 
   const counts = useMemo(() => {
     const today = isoDay();
     return {
-      all: routes.length,
-      active: routes.filter((r) => r.active).length,
-      paused: routes.filter((r) => !r.active).length,
-      today: routes.filter((r) => r.active && r.days.includes(today)).length,
+      all: schedules.length,
+      active: schedules.filter((r) => r.active).length,
+      paused: schedules.filter((r) => !r.active).length,
+      today: schedules.filter((r) => r.active && r.days.includes(today)).length,
     };
-  }, [routes]);
+  }, [schedules]);
 
   const filtered = status !== 'all' || !!lotFilter || !!query.trim();
   const clearFilters = () => { setStatus('all'); setLotFilter(null); setQuery(''); };
 
   async function toggleActive(item) {
     const value = !item.active;
-    setRoutes((rs) => rs.map((r) => (r.id === item.id ? { ...r, active: value } : r)));
+    setSchedules((rs) => rs.map((r) => (r.id === item.id ? { ...r, active: value } : r)));
     try {
-      const upd = await routesApi.update(item.id, { active: value });
-      setRoutes((rs) => rs.map((r) => (r.id === item.id ? upd : r)));
+      const upd = await schedulesApi.update(item.id, { active: value });
+      setSchedules((rs) => rs.map((r) => (r.id === item.id ? upd : r)));
     } catch (e) {
-      setRoutes((rs) => rs.map((r) => (r.id === item.id ? { ...r, active: !value } : r)));
+      setSchedules((rs) => rs.map((r) => (r.id === item.id ? { ...r, active: !value } : r)));
       showToast('error', e.message);
     }
   }
@@ -149,12 +149,12 @@ export default function RoutesScreen({ navigation, route }) {
     if (!toDelete) return;
     setDeleting(true);
     try {
-      await routesApi.remove(toDelete.id);
-      setRoutes((rs) => rs.filter((r) => r.id !== toDelete.id));
-      showToast('success', `Đã xoá lộ trình "${toDelete.name}".`);
+      await schedulesApi.remove(toDelete.id);
+      setSchedules((rs) => rs.filter((r) => r.id !== toDelete.id));
+      showToast('success', `Đã xoá lịch "${toDelete.name}".`);
       setToDelete(null);
     } catch (e) {
-      if (e.code === 'route_not_found') setRoutes((rs) => rs.filter((r) => r.id !== toDelete.id));
+      if (e.code === 'schedule_not_found') setSchedules((rs) => rs.filter((r) => r.id !== toDelete.id));
       showToast('error', e.message);
       setToDelete(null);
     } finally {
@@ -185,13 +185,13 @@ export default function RoutesScreen({ navigation, route }) {
   }
 
   const renderItem = ({ item }) => (
-    <RouteCard
+    <ScheduleCard
       item={item}
       open={expanded.has(item.id)}
       reserving={reservingId === item.id}
       onToggle={() => toggleExpand(item.id)}
       onToggleActive={() => toggleActive(item)}
-      onEdit={() => navigation.navigate('RouteForm', { editing: item })}
+      onEdit={() => navigation.navigate('ScheduleForm', { editing: item })}
       onDelete={() => setToDelete(item)}
       onReserve={() => quickReserve(item)}
     />
@@ -207,15 +207,15 @@ export default function RoutesScreen({ navigation, route }) {
           <Ionicons name="chevron-back" size={22} color={colors.text} />
         </Pressable>
         <View style={{ flex: 1, marginLeft: 10 }}>
-          <Text style={styles.headerTitle}>Lộ trình của tôi</Text>
+          <Text style={styles.headerTitle}>Lịch gửi xe</Text>
           <Text style={styles.headerSub}>
-            {counts.all} lộ trình • {counts.today} chuyến hôm nay
+            {counts.all} lịch • {counts.today} lịch hôm nay
           </Text>
         </View>
         <Pressable
-          onPress={() => navigation.navigate('RouteForm')}
+          onPress={() => navigation.navigate('ScheduleForm')}
           style={({ pressed }) => [styles.addBtn, pressed && styles.pressed]}
-          accessibilityLabel="Thêm lộ trình"
+          accessibilityLabel="Thêm lịch gửi xe"
         >
           <Ionicons name="add" size={20} color="#fff" />
           <Text style={styles.addBtnText}>Thêm</Text>
@@ -229,7 +229,7 @@ export default function RoutesScreen({ navigation, route }) {
           <TextInput
             value={query}
             onChangeText={setQuery}
-            placeholder="Tìm theo tên, điểm đi, bãi đỗ, biển số..."
+            placeholder="Tìm theo tên, bãi đỗ, biển số, ghi chú..."
             placeholderTextColor={colors.placeholder}
             style={styles.searchInput}
             autoCorrect={false}
@@ -266,7 +266,7 @@ export default function RoutesScreen({ navigation, route }) {
             <Ionicons name="swap-vertical" size={14} color={colors.textMuted} />
             <Text style={styles.toolText}>Sắp xếp: <Text style={styles.toolStrong}>{SORTS.find((s) => s.key === sort).label}</Text></Text>
           </Pressable>
-          {routes.length > 0 && (
+          {schedules.length > 0 && (
             <Pressable onPress={toggleAll} style={styles.toolBtn}>
               <Ionicons name={allExpanded ? 'contract-outline' : 'expand-outline'} size={14} color={colors.textMuted} />
               <Text style={styles.toolText}>{allExpanded ? 'Thu gọn tất cả' : 'Mở rộng tất cả'}</Text>
@@ -281,7 +281,7 @@ export default function RoutesScreen({ navigation, route }) {
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.primary} />
-          <Text style={styles.muted}>Đang tải lộ trình...</Text>
+          <Text style={styles.muted}>Đang tải lịch gửi xe...</Text>
         </View>
       ) : (
         <FlatList
@@ -295,15 +295,15 @@ export default function RoutesScreen({ navigation, route }) {
           }
           ListEmptyComponent={
             loadError ? (
-              <EmptyState icon="cloud-offline-outline" title="Không tải được lộ trình" sub={loadError}
+              <EmptyState icon="cloud-offline-outline" title="Không tải được lịch gửi xe" sub={loadError}
                 action="Thử lại" onAction={() => { setLoading(true); load(); }} />
             ) : filtered ? (
-              <EmptyState icon="filter-outline" title="Không có lộ trình phù hợp" sub="Thử đổi từ khoá hoặc bộ lọc."
+              <EmptyState icon="filter-outline" title="Không có lịch phù hợp" sub="Thử đổi từ khoá hoặc bộ lọc."
                 action="Xoá bộ lọc" onAction={clearFilters} />
             ) : (
-              <EmptyState icon="map-outline" title="Chưa có lộ trình nào"
-                sub="Lưu các chuyến đi quen thuộc (vd: Nhà → Công ty) để xem nhanh ô trống và đặt chỗ chỉ với 1 chạm."
-                action="Thêm lộ trình đầu tiên" onAction={() => navigation.navigate('RouteForm')} />
+              <EmptyState icon="calendar-outline" title="Chưa có lịch gửi xe nào"
+                sub="Lưu thói quen gửi xe (vd: Đi làm – gửi ở bãi quen lúc 07:30, T2–T6) để xem nhanh ô trống và đặt chỗ chỉ với 1 chạm."
+                action="Thêm lịch đầu tiên" onAction={() => navigation.navigate('ScheduleForm')} />
             )
           }
         />
@@ -312,8 +312,8 @@ export default function RoutesScreen({ navigation, route }) {
       <ConfirmDialog
         visible={!!toDelete}
         danger
-        title="Xoá lộ trình?"
-        message={toDelete ? `Lộ trình "${toDelete.name}" sẽ bị xoá vĩnh viễn.` : ''}
+        title="Xoá lịch gửi xe?"
+        message={toDelete ? `Lịch "${toDelete.name}" sẽ bị xoá vĩnh viễn.` : ''}
         confirmLabel="Xoá"
         loading={deleting}
         onConfirm={confirmDelete}
@@ -324,9 +324,9 @@ export default function RoutesScreen({ navigation, route }) {
 }
 
 // =====================================================================
-function RouteCard({ item, open, reserving, onToggle, onToggleActive, onEdit, onDelete, onReserve }) {
+function ScheduleCard({ item, open, reserving, onToggle, onToggleActive, onEdit, onDelete, onReserve }) {
   const lot = item.lot || {};
-  const next = item.active ? nextDeparture(item) : null;
+  const next = item.active ? nextArrival(item) : null;
   const today = isoDay();
   const estFee = lot.pricePerHour != null ? Math.ceil((lot.pricePerHour * item.minutes) / 60 / 1000) * 1000 : null;
   const canReserve = item.active && lot.online && lot.freeSlots > 0;
@@ -336,22 +336,22 @@ function RouteCard({ item, open, reserving, onToggle, onToggleActive, onEdit, on
       <Pressable onPress={onToggle} style={styles.cardHead} accessibilityRole="button" accessibilityState={{ expanded: open }}
         accessibilityLabel={`${item.name}, ${open ? 'thu gọn' : 'xem chi tiết'}`}>
         <View style={[styles.timeBox, !item.active && styles.timeBoxPaused]}>
-          <Text style={[styles.timeText, !item.active && { color: colors.textMuted }]}>{item.departTime}</Text>
+          <Text style={[styles.timeText, !item.active && { color: colors.textMuted }]}>{item.arriveTime}</Text>
           <Text style={styles.timeDays} numberOfLines={1}>{daysLabel(item.days)}</Text>
         </View>
 
         <View style={{ flex: 1 }}>
           <Text style={styles.cardTitle} numberOfLines={1}>{item.name}</Text>
           <View style={styles.pathRow}>
-            <Text style={styles.pathText} numberOfLines={1}>{item.origin || 'Vị trí hiện tại'}</Text>
-            <Ionicons name="arrow-forward" size={12} color={colors.textMuted} />
+            <Ionicons name="location-outline" size={12} color={colors.textMuted} />
             <Text style={[styles.pathText, styles.pathLot]} numberOfLines={1}>{lot.name || item.lotId}</Text>
+            {item.vehiclePlate ? <Text style={styles.pathText} numberOfLines={1}>• {item.vehiclePlate}</Text> : null}
           </View>
           <View style={styles.badgeRow}>
             {item.active ? (
               next ? (
                 <Badge icon="navigate-outline" color={colors.primary} bg={colors.primarySoft}
-                  text={next.inMinutes <= 180 ? `Khởi hành sau ${formatDuration(next.inMinutes)}` : next.label} />
+                  text={next.inMinutes <= 180 ? `Gửi xe sau ${formatDuration(next.inMinutes)}` : next.label} />
               ) : null
             ) : (
               <Badge icon="pause-circle-outline" color={colors.textMuted} bg="#F1F5F9" text="Tạm tắt" />
@@ -371,7 +371,7 @@ function RouteCard({ item, open, reserving, onToggle, onToggleActive, onEdit, on
             onValueChange={onToggleActive}
             trackColor={{ false: '#CBD5E1', true: '#93C5FD' }}
             thumbColor={item.active ? colors.primary : '#F8FAFC'}
-            accessibilityLabel={item.active ? 'Tắt lộ trình' : 'Bật lộ trình'}
+            accessibilityLabel={item.active ? 'Tắt lịch' : 'Bật lịch'}
           />
           <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
         </View>
@@ -390,13 +390,12 @@ function RouteCard({ item, open, reserving, onToggle, onToggleActive, onEdit, on
             })}
           </View>
 
-          <DetailRow icon="location-outline" label="Điểm đi" value={item.origin || 'Vị trí hiện tại'} />
           <DetailRow icon="business-outline" label="Bãi đỗ" value={[lot.name, lot.address].filter(Boolean).join(' • ')} />
           <DetailRow icon="car-sport-outline" label="Xe" value={item.vehiclePlate || 'Chưa chọn xe'} />
           <DetailRow icon="time-outline" label="Giữ chỗ" value={`${item.minutes} phút`} />
           <DetailRow icon="cash-outline" label="Giá bãi"
             value={lot.pricePerHour != null ? `${formatVND(lot.pricePerHour)}/giờ • ước tính ${formatVND(estFee)}` : '—'} />
-          {next ? <DetailRow icon="calendar-outline" label="Chuyến tới" value={next.label} /> : null}
+          {next ? <DetailRow icon="calendar-outline" label="Lần tới" value={next.label} /> : null}
           {item.note ? <DetailRow icon="document-text-outline" label="Ghi chú" value={item.note} /> : null}
 
           <View style={styles.actions}>
@@ -409,17 +408,17 @@ function RouteCard({ item, open, reserving, onToggle, onToggleActive, onEdit, on
               {reserving ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="flash" size={16} color="#fff" />}
               <Text style={styles.reserveText}>Đặt chỗ ngay</Text>
             </Pressable>
-            <Pressable onPress={onEdit} style={({ pressed }) => [styles.actBtn, pressed && styles.pressed]} accessibilityLabel="Sửa lộ trình">
+            <Pressable onPress={onEdit} style={({ pressed }) => [styles.actBtn, pressed && styles.pressed]} accessibilityLabel="Sửa lịch gửi xe">
               <Ionicons name="create-outline" size={18} color={colors.primary} />
               <Text style={styles.actText}>Sửa</Text>
             </Pressable>
-            <Pressable onPress={onDelete} style={({ pressed }) => [styles.actBtn, styles.actDanger, pressed && styles.pressed]} accessibilityLabel="Xoá lộ trình">
+            <Pressable onPress={onDelete} style={({ pressed }) => [styles.actBtn, styles.actDanger, pressed && styles.pressed]} accessibilityLabel="Xoá lịch gửi xe">
               <Ionicons name="trash-outline" size={18} color={colors.danger} />
             </Pressable>
           </View>
           {!canReserve ? (
             <Text style={styles.hint}>
-              {!item.active ? 'Bật lộ trình để đặt chỗ nhanh.' : !lot.online ? 'Bãi đỗ đang offline.' : 'Bãi đỗ đã hết ô trống.'}
+              {!item.active ? 'Bật lịch để đặt chỗ nhanh.' : !lot.online ? 'Bãi đỗ đang offline.' : 'Bãi đỗ đã hết ô trống.'}
             </Text>
           ) : null}
         </View>

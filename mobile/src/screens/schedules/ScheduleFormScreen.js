@@ -1,9 +1,9 @@
-// UI-005 CREATE / EDIT ROUTE: Them / Sua lo trinh
-// params: { editing?: route } - co editing = che do sua
-// - Ten (goi y nhanh), diem xuat phat (goi y), bai do dich (kem so o trong / online)
-// - Gio khoi hanh (go tay "0730" / nut ±15 phut / gio goi y), ngay lap lai (T2..CN + nhom nhanh)
+// UI-005 CREATE / EDIT: Them / Sua lich gui xe
+// params: { editing?: schedule } - co editing = che do sua
+// - Ten (goi y nhanh), bai do (kem so o trong / online)
+// - Gio den bai (go tay "0730" / nut ±15 phut / gio goi y), ngay lap lai (T2..CN + nhom nhanh)
 // - Xe su dung (them xe moi ngay tai day), thoi gian giu cho khi dat nhanh (uoc tinh phi), ghi chu, bat/tat
-// - Xem truoc lo trinh, chan thoat khi chua luu, xoa lo trinh (che do sua)
+// - Xem truoc, chan thoat khi chua luu, xoa lich (che do sua)
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View,
@@ -16,31 +16,29 @@ import Button from '../../components/Button';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import Notice from '../../components/Notice';
 import TextField from '../../components/TextField';
-import { routesApi } from '../../api/routes';
+import { schedulesApi } from '../../api/schedules';
 import { lotsApi } from '../../api/lots';
 import { vehiclesApi } from '../../api/vehicles';
 import { colors, radius } from '../../theme';
-import { daysLabel, DAY_PRESETS, formatDuration, formatVND, nextDeparture, normalizeTime, WEEKDAYS } from '../../utils/routes';
+import { daysLabel, DAY_PRESETS, formatDuration, formatVND, nextArrival, normalizeTime, WEEKDAYS } from '../../utils/schedules';
 
 const TIME_PRESETS = ['06:30', '07:00', '07:30', '08:00', '12:00', '17:00', '17:30', '18:00'];
 const MINUTE_OPTIONS = [15, 30, 45, 60, 90, 120];
-const NAME_SUGGESTIONS = ['Nhà → Công ty', 'Công ty → Nhà', 'Đi học', 'Đi siêu thị', 'Đón con'];
-const ORIGIN_SUGGESTIONS = ['Nhà', 'Công ty', 'Trường học'];
+const NAME_SUGGESTIONS = ['Đi làm', 'Đi học', 'Đón con', 'Đi siêu thị', 'Tập thể thao'];
 const NOTE_MAX = 255;
 
 // Loi tu server -> hien duoi o tuong ung
 const FIELD_ERRORS = {
   lot_not_found: 'lotId',
   vehicle_not_found: 'vehicleId',
-  route_limit: 'form',
+  schedule_limit: 'form',
 };
 
 const initialForm = (r) => ({
   name: r?.name || '',
-  origin: r?.origin || '',
   lotId: r?.lotId || null,
   vehicleId: r?.vehicleId || null,
-  departTime: r?.departTime || '07:30',
+  arriveTime: r?.arriveTime || '07:30',
   days: r?.days || [1, 2, 3, 4, 5],
   minutes: r?.minutes || 15,
   note: r?.note || '',
@@ -58,7 +56,7 @@ function shiftTime(t, delta) {
 const estimateFee = (pricePerHour, minutes) =>
   pricePerHour == null ? null : Math.ceil((pricePerHour * minutes) / 60 / 1000) * 1000;
 
-export default function RouteFormScreen({ navigation, route }) {
+export default function ScheduleFormScreen({ navigation, route }) {
   const editing = route.params?.editing || null;
   const [original] = useState(() => initialForm(editing));
   const [form, setForm] = useState(original);
@@ -85,7 +83,7 @@ export default function RouteFormScreen({ navigation, route }) {
     const [l, v] = await Promise.allSettled([lotsApi.list(), vehiclesApi.list()]);
     if (l.status === 'fulfilled') {
       setLots(l.value || []);
-      // Lo trinh moi + chi co 1 bai -> chon san
+      // Lich moi + chi co 1 bai -> chon san
       if (!editing && l.value?.length === 1) setForm((f) => ({ ...f, lotId: f.lotId || l.value[0].id }));
     } else setRefsError(l.reason?.message || 'Không tải được danh sách bãi đỗ.');
     if (v.status === 'fulfilled') setVehicles(v.value || []);
@@ -96,8 +94,8 @@ export default function RouteFormScreen({ navigation, route }) {
 
   // ---------- Chan thoat khi chua luu ----------
   const dirty = useMemo(() => {
-    const a = { ...form, departTime: normalizeTime(form.departTime) || form.departTime };
-    // Lo trinh moi: bai duoc chon san tu dong khong tinh la "da sua"
+    const a = { ...form, arriveTime: normalizeTime(form.arriveTime) || form.arriveTime };
+    // Lich moi: bai duoc chon san tu dong khong tinh la "da sua"
     const b = { ...original, lotId: editing ? original.lotId : a.lotId };
     return JSON.stringify(a) !== JSON.stringify(b);
   }, [form, original, editing]);
@@ -105,7 +103,7 @@ export default function RouteFormScreen({ navigation, route }) {
   usePreventRemove(dirty && !exitTo, ({ data }) => setPendingLeave(data.action));
 
   useEffect(() => {
-    if (exitTo) navigation.popTo('Routes', exitTo);
+    if (exitTo) navigation.popTo('Schedules', exitTo);
   }, [exitTo, navigation]);
 
   // ---------- Form ----------
@@ -124,25 +122,24 @@ export default function RouteFormScreen({ navigation, route }) {
   };
 
   const stepTime = (delta) => {
-    setForm((f) => ({ ...f, departTime: shiftTime(f.departTime, delta) }));
-    if (errs.departTime) setErrs((e) => ({ ...e, departTime: undefined }));
+    setForm((f) => ({ ...f, arriveTime: shiftTime(f.arriveTime, delta) }));
+    if (errs.arriveTime) setErrs((e) => ({ ...e, arriveTime: undefined }));
   };
 
   const selectedLot = useMemo(() => lots.find((l) => l.id === form.lotId), [lots, form.lotId]);
   const selectedVehicle = useMemo(() => vehicles.find((v) => v.id === form.vehicleId), [vehicles, form.vehicleId]);
-  const validTime = normalizeTime(form.departTime);
+  const validTime = normalizeTime(form.arriveTime);
   const next = useMemo(
-    () => (validTime && form.days.length ? nextDeparture({ departTime: validTime, days: form.days }) : null),
+    () => (validTime && form.days.length ? nextArrival({ arriveTime: validTime, days: form.days }) : null),
     [validTime, form.days],
   );
 
   function validate() {
     const e = {};
-    if (!form.name.trim()) e.name = 'Vui lòng đặt tên lộ trình (vd: Nhà → Công ty)';
+    if (!form.name.trim()) e.name = 'Vui lòng đặt tên cho lịch (vd: Đi làm)';
     else if (form.name.trim().length > 60) e.name = 'Tối đa 60 ký tự';
-    if (form.origin.trim().length > 120) e.origin = 'Tối đa 120 ký tự';
-    if (!form.lotId) e.lotId = 'Chọn bãi đỗ đích';
-    if (!validTime) e.departTime = 'Giờ không hợp lệ (vd: 07:30 hoặc gõ 0730)';
+    if (!form.lotId) e.lotId = 'Chọn bãi gửi xe';
+    if (!validTime) e.arriveTime = 'Giờ không hợp lệ (vd: 07:30 hoặc gõ 0730)';
     if (form.days.length === 0) e.days = 'Chọn ít nhất 1 ngày';
     if (form.note.trim().length > NOTE_MAX) e.note = `Tối đa ${NOTE_MAX} ký tự`;
     setErrs(e);
@@ -156,19 +153,18 @@ export default function RouteFormScreen({ navigation, route }) {
     setBusy(true);
     const body = {
       name: form.name.trim(),
-      origin: form.origin.trim() || null,
       lotId: form.lotId,
       vehicleId: form.vehicleId,
-      departTime: validTime,
+      arriveTime: validTime,
       days: form.days,
       minutes: form.minutes,
       note: form.note.trim() || null,
       active: form.active,
     };
     try {
-      const saved = editing ? await routesApi.update(editing.id, body) : await routesApi.create(body);
+      const saved = editing ? await schedulesApi.update(editing.id, body) : await schedulesApi.create(body);
       setExitTo({
-        saved: { id: saved.id, text: editing ? `Đã cập nhật "${saved.name}".` : `Đã thêm lộ trình "${saved.name}".` },
+        saved: { id: saved.id, text: editing ? `Đã cập nhật "${saved.name}".` : `Đã thêm lịch "${saved.name}".` },
       });
     } catch (e) {
       const field = FIELD_ERRORS[e.code];
@@ -181,12 +177,12 @@ export default function RouteFormScreen({ navigation, route }) {
   async function onDelete() {
     setDeleting(true);
     try {
-      await routesApi.remove(editing.id);
+      await schedulesApi.remove(editing.id);
       setConfirmDelete(false);
-      setExitTo({ saved: { text: `Đã xoá lộ trình "${editing.name}".` } });
+      setExitTo({ saved: { text: `Đã xoá lịch "${editing.name}".` } });
     } catch (e) {
       setConfirmDelete(false);
-      if (e.code === 'route_not_found') setExitTo({ saved: { text: e.message } });
+      if (e.code === 'schedule_not_found') setExitTo({ saved: { text: e.message } });
       else setError(e.message);
     } finally {
       setDeleting(false);
@@ -217,7 +213,7 @@ export default function RouteFormScreen({ navigation, route }) {
           <Ionicons name="close" size={22} color={colors.text} />
         </Pressable>
         <View style={{ alignItems: 'center' }}>
-          <Text style={styles.headerTitle}>{editing ? 'Sửa lộ trình' : 'Thêm lộ trình'}</Text>
+          <Text style={styles.headerTitle}>{editing ? 'Sửa lịch gửi xe' : 'Thêm lịch gửi xe'}</Text>
           {dirty ? <Text style={styles.headerSub}>Chưa lưu thay đổi</Text> : null}
         </View>
         <View style={{ width: 36 }} />
@@ -227,28 +223,22 @@ export default function RouteFormScreen({ navigation, route }) {
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           {error ? <Notice type="error">{error}</Notice> : null}
 
-          {/* 1. Thong tin chuyen di */}
-          <Section icon="bookmark-outline" title="Thông tin chuyến đi">
-            <TextField label="Tên lộ trình *" icon="bookmark-outline" placeholder="Vd: Nhà → Công ty"
-              value={form.name} onChangeText={set('name')} error={errs.name} autoCapitalize="sentences" maxLength={60} />
+          {/* 1. Ten lich */}
+          <Section icon="bookmark-outline" title="Tên lịch">
+            <TextField label="Tên *" icon="bookmark-outline" placeholder="Vd: Đi làm"
+              value={form.name} onChangeText={set('name')} error={errs.name} autoCapitalize="sentences" maxLength={60}
+              style={{ marginBottom: editing ? 0 : 14 }} />
             {!editing && (
-              <View style={[styles.wrapRow, styles.suggestRow]}>
+              <View style={[styles.wrapRow, styles.suggestRow, { marginBottom: 0 }]}>
                 {NAME_SUGGESTIONS.map((s) => (
                   <Pill key={s} label={s} small on={form.name === s} onPress={() => set('name')(s)} />
                 ))}
               </View>
             )}
-            <TextField label="Điểm xuất phát" icon="location-outline" placeholder="Để trống = vị trí hiện tại"
-              value={form.origin} onChangeText={set('origin')} error={errs.origin} autoCapitalize="sentences" maxLength={120} />
-            <View style={[styles.wrapRow, styles.suggestRow, { marginBottom: 0 }]}>
-              {ORIGIN_SUGGESTIONS.map((s) => (
-                <Pill key={s} label={s} small icon="location-outline" on={form.origin === s} onPress={() => set('origin')(s)} />
-              ))}
-            </View>
           </Section>
 
           {/* 2. Bai do dich */}
-          <Section icon="business-outline" title="Bãi đỗ đích *" error={errs.lotId}>
+          <Section icon="business-outline" title="Gửi xe ở bãi *" error={errs.lotId}>
             {loadingRefs ? (
               <ActivityIndicator color={colors.primary} style={{ marginVertical: 12 }} />
             ) : refsError ? (
@@ -284,21 +274,21 @@ export default function RouteFormScreen({ navigation, route }) {
               })
             )}
             {selectedLot && !selectedLot.online ? (
-              <Text style={styles.warn}>Bãi đang offline: vẫn lưu được lộ trình, nhưng chưa đặt chỗ nhanh được.</Text>
+              <Text style={styles.warn}>Bãi đang offline: vẫn lưu được lịch, nhưng chưa đặt chỗ nhanh được.</Text>
             ) : null}
           </Section>
 
           {/* 3. Gio khoi hanh */}
-          <Section icon="time-outline" title="Giờ khởi hành *" error={errs.departTime}>
+          <Section icon="time-outline" title="Giờ đến bãi *" error={errs.arriveTime}>
             <View style={styles.timeRow}>
               <StepBtn icon="remove" label="Lùi 15 phút" onPress={() => stepTime(-15)} />
-              <TextField icon="time-outline" placeholder="HH:MM" value={form.departTime} keyboardType="numbers-and-punctuation"
-                onChangeText={set('departTime')} maxLength={5} style={styles.timeField} accessibilityLabel="Giờ khởi hành" />
+              <TextField icon="time-outline" placeholder="HH:MM" value={form.arriveTime} keyboardType="numbers-and-punctuation"
+                onChangeText={set('arriveTime')} maxLength={5} style={styles.timeField} accessibilityLabel="Giờ đến bãi" />
               <StepBtn icon="add" label="Thêm 15 phút" onPress={() => stepTime(15)} />
             </View>
             <View style={styles.wrapRow}>
               {TIME_PRESETS.map((t) => (
-                <Pill key={t} label={t} on={validTime === t} onPress={() => set('departTime')(t)} />
+                <Pill key={t} label={t} on={validTime === t} onPress={() => set('arriveTime')(t)} />
               ))}
             </View>
           </Section>
@@ -376,10 +366,10 @@ export default function RouteFormScreen({ navigation, route }) {
               hint={`${form.note.length}/${NOTE_MAX}`} />
             <View style={styles.switchRow}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.switchTitle}>Kích hoạt lộ trình</Text>
-                <Text style={styles.muted}>Tắt khi tạm thời không đi tuyến này.</Text>
+                <Text style={styles.switchTitle}>Bật lịch gửi xe</Text>
+                <Text style={styles.muted}>Tắt khi tạm thời không gửi xe theo lịch này.</Text>
               </View>
-              <Switch value={form.active} onValueChange={set('active')} accessibilityLabel="Kích hoạt lộ trình"
+              <Switch value={form.active} onValueChange={set('active')} accessibilityLabel="Bật lịch gửi xe"
                 trackColor={{ false: '#CBD5E1', true: '#93C5FD' }} thumbColor={form.active ? colors.primary : '#F8FAFC'} />
             </View>
           </Section>
@@ -397,13 +387,13 @@ export default function RouteFormScreen({ navigation, route }) {
                 <Text style={styles.previewDays} numberOfLines={1}>{form.days.length ? daysLabel(form.days) : 'Chưa chọn ngày'}</Text>
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.previewName} numberOfLines={1}>{form.name.trim() || 'Tên lộ trình'}</Text>
+                <Text style={styles.previewName} numberOfLines={1}>{form.name.trim() || 'Tên lịch'}</Text>
                 <Text style={styles.previewPath} numberOfLines={1}>
-                  {form.origin.trim() || 'Vị trí hiện tại'} → {selectedLot?.name || 'Chọn bãi đỗ'}
+                  {selectedLot?.name || 'Chọn bãi đỗ'}{selectedLot?.address ? ` • ${selectedLot.address}` : ''}
                 </Text>
                 <Text style={styles.previewMeta} numberOfLines={2}>
                   {selectedVehicle ? `Xe ${selectedVehicle.plateNumber}` : 'Chưa chọn xe'} • Giữ chỗ {form.minutes} phút
-                  {form.active && next ? ` • Chuyến tới: ${next.inMinutes <= 180 ? `sau ${formatDuration(next.inMinutes)}` : next.label}` : ''}
+                  {form.active && next ? ` • Lần tới: ${next.inMinutes <= 180 ? `sau ${formatDuration(next.inMinutes)}` : next.label}` : ''}
                 </Text>
               </View>
             </View>
@@ -413,11 +403,11 @@ export default function RouteFormScreen({ navigation, route }) {
         <View style={styles.footer}>
           {editing ? (
             <Pressable onPress={() => setConfirmDelete(true)} disabled={busy}
-              style={({ pressed }) => [styles.deleteBtn, pressed && { opacity: 0.7 }]} accessibilityRole="button" accessibilityLabel="Xoá lộ trình">
+              style={({ pressed }) => [styles.deleteBtn, pressed && { opacity: 0.7 }]} accessibilityRole="button" accessibilityLabel="Xoá lịch gửi xe">
               <Ionicons name="trash-outline" size={20} color={colors.danger} />
             </Pressable>
           ) : null}
-          <Button title={editing ? 'Lưu thay đổi' : 'Thêm lộ trình'} onPress={onSave} loading={busy}
+          <Button title={editing ? 'Lưu thay đổi' : 'Thêm lịch gửi xe'} onPress={onSave} loading={busy}
             disabled={loadingRefs || (editing && !dirty)} style={{ flex: 1 }} />
         </View>
       </KeyboardAvoidingView>
@@ -435,8 +425,8 @@ export default function RouteFormScreen({ navigation, route }) {
       <ConfirmDialog
         visible={confirmDelete}
         danger
-        title="Xoá lộ trình?"
-        message={editing ? `Lộ trình "${editing.name}" sẽ bị xoá vĩnh viễn.` : ''}
+        title="Xoá lịch gửi xe?"
+        message={editing ? `Lịch "${editing.name}" sẽ bị xoá vĩnh viễn.` : ''}
         confirmLabel="Xoá"
         loading={deleting}
         onConfirm={onDelete}

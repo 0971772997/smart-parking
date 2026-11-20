@@ -1,4 +1,4 @@
-// Tien ich cho lo trinh: nhan ngay trong tuan, chuyen di tiep theo
+// Tien ich cho lich gui xe: nhan ngay trong tuan, lan gui xe tiep theo
 // Quy uoc ngay: 1 = Thu 2 ... 7 = Chu nhat (giong server)
 export const WEEKDAYS = [
   { day: 1, short: 'T2' },
@@ -27,18 +27,18 @@ export function daysLabel(days = []) {
   return sorted.map((d) => WEEKDAYS[d - 1]?.short).join(', ');
 }
 
-/** Lan khoi hanh tiep theo (trong 7 ngay toi) -> { date, label, inMinutes } hoac null */
-export function nextDeparture(route, now = new Date()) {
-  if (!route?.days?.length || !route.departTime) return null;
-  const [h, m] = route.departTime.split(':').map(Number);
+/** Lan den bai tiep theo (trong 7 ngay toi) -> { date, label, inMinutes } hoac null */
+export function nextArrival(schedule, now = new Date()) {
+  if (!schedule?.days?.length || !schedule.arriveTime) return null;
+  const [h, m] = schedule.arriveTime.split(':').map(Number);
   for (let i = 0; i <= 7; i++) {
     const d = new Date(now);
     d.setDate(now.getDate() + i);
     d.setHours(h, m, 0, 0);
-    if (d <= now || !route.days.includes(isoDay(d))) continue;
+    if (d <= now || !schedule.days.includes(isoDay(d))) continue;
     const inMinutes = Math.round((d - now) / 60000);
     const dayText = i === 0 ? 'Hôm nay' : i === 1 ? 'Ngày mai' : WEEKDAYS[isoDay(d) - 1].short;
-    return { date: d, inMinutes, label: `${dayText} ${route.departTime}` };
+    return { date: d, inMinutes, label: `${dayText} ${schedule.arriveTime}` };
   }
   return null;
 }

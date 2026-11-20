@@ -1,21 +1,22 @@
-// Lo trinh thuong di cua tai xe: CRUD, chi chu so huu moi xem/sua/xoa duoc
+// Lich gui xe thuong xuyen cua tai xe: CRUD, chi chu so huu moi xem/sua/xoa duoc
+// Vd: "Di lam" - gui xe o bai X luc 07:30, T2-T6, giu cho 30 phut -> app dat cho nhanh 1 cham
 const express = require('express');
 const { wrap, badRequest, notFound, conflict } = require('../errors');
 const v = require('../validate');
 const map = require('../mappers');
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
-const MAX_ROUTES = 20;
+const MAX_SCHEDULES = 20;
 
-// Kem thong tin bai dich (ten, dia chi, gia, online, so o trong) + bien so xe
+// Kem thong tin bai (ten, dia chi, gia, online, so o trong) + bien so xe
 const SELECT = `
-  SELECT dr.*, l.name AS lot_name, l.address AS lot_address, l.price_per_hour AS lot_price_per_hour,
+  SELECT ps.*, l.name AS lot_name, l.address AS lot_address, l.price_per_hour AS lot_price_per_hour,
          l.online AS lot_online, l.total_slots AS lot_total_slots,
          (SELECT COUNT(*) FROM slots s WHERE s.lot_id = l.id AND s.state = 'free') AS lot_free_slots,
          veh.plate_number AS vehicle_plate
-  FROM driver_routes dr
-  JOIN parking_lots l ON l.id = dr.lot_id
-  LEFT JOIN vehicles veh ON veh.id = dr.vehicle_id`;
+  FROM parking_schedules ps
+  JOIN parking_lots l ON l.id = ps.lot_id
+  LEFT JOIN vehicles veh ON veh.id = ps.vehicle_id`;
 
 function parseDays(body, partial) {
   const d = body?.days;
@@ -32,10 +33,9 @@ function parseBody(body, partial) {
   const has = (k) => !partial || body?.[k] !== undefined;
   const out = {};
   if (has('name')) out.name = v.str(body, 'name', { max: 60 });
-  if (has('origin')) out.origin = v.str(body, 'origin', { max: 120, optional: true });
   if (has('lotId')) out.lot_id = v.str(body, 'lotId', { max: 50 });
   if (has('vehicleId')) out.vehicle_id = v.int(body, 'vehicleId', { min: 1, optional: true });
-  if (has('departTime')) out.depart_time = v.str(body, 'departTime', { pattern: TIME_RE });
+  if (has('arriveTime')) out.arrive_time = v.str(body, 'arriveTime', { pattern: TIME_RE });
   const days = parseDays(body, partial);
   if (days !== undefined) out.days = days;
   if (has('minutes')) out.minutes = v.int(body, 'minutes', { min: 1, max: 120, def: partial ? undefined : 15 });
@@ -48,7 +48,7 @@ function parseBody(body, partial) {
   return out;
 }
 
-module.exports = function driverRouteRoutes({ db, auth }) {
+module.exports = function scheduleRoutes({ db, auth }) {
   const r = express.Router();
   r.use(auth.requireAuth);
 
@@ -61,31 +61,30 @@ module.exports = function driverRouteRoutes({ db, auth }) {
     }
   }
 
-  const getOne = (id, userId) => db.one(`${SELECT} WHERE dr.id = $1 AND dr.user_id = $2`, [id, userId]);
+  const getOne = (id, userId) => db.one(`${SELECT} WHERE ps.id = $1 AND ps.user_id = $2`, [id, userId]);
 
-  // Danh sach lo trinh cua toi, sap theo gio di
+  // Danh sach lich gui xe cua toi, sap theo gio den bai
   r.get('/', wrap(async (req, res) => {
-    const { rows } = await db.query(`${SELECT} WHERE dr.user_id = $1 ORDER BY dr.depart_time, dr.id`, [req.user.id]);
-    res.json(rows.map(map.driverRoute));
+    const { rows } = await db.query(`${SELECT} WHERE ps.user_id = $1 ORDER BY ps.arrive_time, ps.id`, [req.user.id]);
+    res.json(rows.map(map.schedule));
   }));
 
   r.get('/:id', wrap(async (req, res) => {
     const row = await getOne(v.int(req.params, 'id', { min: 1 }), req.user.id);
-    if (!row) throw notFound('route_not_found', 'Khong tim thay lo trinh');
-    res.json(map.driverRoute(row));
+    if (!row) throw notFound('schedule_not_found', 'Khong tim thay lich gui xe');
+    res.json(map.schedule(row));
   }));
 
   r.post('/', wrap(async (req, res) => {
     const data = parseBody(req.body, false);
     await checkRefs(req.user.id, data);
-    const { n } = await db.one('SELECT COUNT(*)::int AS n FROM driver_routes WHERE user_id = $1', [req.user.id]);
-    if (n >= MAX_ROUTES) throw conflict('route_limit', `Toi da ${MAX_ROUTES} lo trinh`);
+    const { n } = await db.one('SELECT COUNT(*)::int AS n FROM parking_schedules WHERE user_id = $1', [req.user.id]);
+    if (n >= MAX_SCHEDULES) throw conflict('schedule_limit', `Toi da ${MAX_SCHEDULES} lich gui xe`);
     const row = await db.one(
-      `INSERT INTO driver_routes (user_id, name, origin, lot_id, vehicle_id, depart_time, days, minutes, note, active)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
-      [req.user.id, data.name, data.origin, data.lot_id, data.vehicle_id, data.depart_time, data.days,
-        data.minutes, data.note, data.active]);
-    res.status(201).json(map.driverRoute(await getOne(row.id, req.user.id)));
+      `INSERT INTO parking_schedules (user_id, name, lot_id, vehicle_id, arrive_time, days, minutes, note, active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+      [req.user.id, data.name, data.lot_id, data.vehicle_id, data.arrive_time, data.days, data.minutes, data.note, data.active]);
+    res.status(201).json(map.schedule(await getOne(row.id, req.user.id)));
   }));
 
   // Sua mot phan (vd chi bat/tat: { active: false })
@@ -97,16 +96,16 @@ module.exports = function driverRouteRoutes({ db, auth }) {
     await checkRefs(req.user.id, data);
     const sets = keys.map((k, i) => `${k} = $${i + 3}`).join(', ');
     const row = await db.one(
-      `UPDATE driver_routes SET ${sets}, updated_at = now() WHERE id = $1 AND user_id = $2 RETURNING id`,
+      `UPDATE parking_schedules SET ${sets}, updated_at = now() WHERE id = $1 AND user_id = $2 RETURNING id`,
       [id, req.user.id, ...keys.map((k) => data[k])]);
-    if (!row) throw notFound('route_not_found', 'Khong tim thay lo trinh');
-    res.json(map.driverRoute(await getOne(id, req.user.id)));
+    if (!row) throw notFound('schedule_not_found', 'Khong tim thay lich gui xe');
+    res.json(map.schedule(await getOne(id, req.user.id)));
   }));
 
   r.delete('/:id', wrap(async (req, res) => {
     const id = v.int(req.params, 'id', { min: 1 });
-    const row = await db.one('DELETE FROM driver_routes WHERE id = $1 AND user_id = $2 RETURNING id', [id, req.user.id]);
-    if (!row) throw notFound('route_not_found', 'Khong tim thay lo trinh');
+    const row = await db.one('DELETE FROM parking_schedules WHERE id = $1 AND user_id = $2 RETURNING id', [id, req.user.id]);
+    if (!row) throw notFound('schedule_not_found', 'Khong tim thay lich gui xe');
     res.status(204).end();
   }));
 
