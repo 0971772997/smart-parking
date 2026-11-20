@@ -3,7 +3,7 @@ import { colors } from '../theme';
 import Notice from './Notice';
 import OtpInput from './OtpInput';
 
-// Buoc nhap OTP dung chung: thong bao da gui, o nhap ma, ma demo, gui lai
+// Buoc nhap OTP dung chung: thong bao da gui, o nhap ma, ho tro dien ma, gui lai
 export default function OtpStep({ otp, code, setCode, error, onResend }) {
   const { session, cooldown, sending } = otp;
   if (!session) return null;
@@ -16,7 +16,7 @@ export default function OtpStep({ otp, code, setCode, error, onResend }) {
       </Text>
       {session.devCode ? (
         <Notice type="info" actionLabel="Điền mã" onAction={() => setCode(session.devCode)}>
-          Chế độ demo (chưa gửi SMS thật). Mã của bạn: {session.devCode}
+          Mã xác thực hệ thống: {session.devCode}
         </Notice>
       ) : null}
       <OtpInput value={code} onChange={setCode} error={error} autoFocus />

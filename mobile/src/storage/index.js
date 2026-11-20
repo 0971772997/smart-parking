@@ -1,5 +1,5 @@
 // Luu tru tren may:
-// - Token dang nhap: SecureStore (ma hoa boi Keychain/Keystore). Tren web dung localStorage (chi de demo).
+// - Token dang nhap: SecureStore (ma hoa boi Keychain/Keystore). Tren web dung localStorage.
 // - Tuy chon "Luu ID", "Tu dong dang nhap", email da luu: AsyncStorage (khong nhay cam).
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';

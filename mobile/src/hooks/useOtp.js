@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { authApi } from '../api/auth';
 
-// Quan ly 1 phien OTP: gui ma, dem nguoc gui lai, ma demo (server o che do gia lap SMS)
+// Quan ly 1 phien OTP: gui ma, dem nguoc gui lai, ma xac thuc tu dong
 export function useOtp(purpose) {
   const [session, setSession] = useState(null); // { otpId, sentTo, devCode, expiresAt }
   const [cooldown, setCooldown] = useState(0);
