@@ -374,6 +374,22 @@ describe('Dong bo tu ESP32 (MQTT -> DB)', () => {
     assert.equal(s.fee, 20000);
     assert.equal(s.reservationId, r.body.id);
   });
+  test('Event slot_changed (khong co khoang cach) -> status ke tiep bo sung khoang cach', async () => {
+    const slots = (d3) => [{ id: 1, state: 'occupied', distance: 20 }, { id: 2, state: 'free', distance: 400 },
+      { id: 3, ...d3 }, { id: 4, state: 'free', distance: 400 }];
+    await sync.handleStatus(LOT, { slots: slots({ state: 'free', distance: 400 }) });
+    await sync.handleEvent(LOT, { type: 'slot_changed', slot: 3, state: 'occupied' });
+    await sync.handleStatus(LOT, { slots: slots({ state: 'occupied', distance: 25 }) });
+    let lot = await api().get(`/api/lots/${LOT}`).expect(200);
+    assert.equal(lot.body.slots[2].state, 'occupied');
+    assert.equal(lot.body.slots[2].distanceCm, 25);
+    // xe ra: event truoc, status sau -> khoang cach ve 400
+    await sync.handleEvent(LOT, { type: 'slot_changed', slot: 3, state: 'free' });
+    await sync.handleStatus(LOT, { slots: slots({ state: 'free', distance: 400 }) });
+    lot = await api().get(`/api/lots/${LOT}`).expect(200);
+    assert.equal(lot.body.slots[2].state, 'free');
+    assert.equal(lot.body.slots[2].distanceCm, 400);
+  });
   test('reservation_expired -> dat cho het han, o tro ve free', async () => {
     const r = await api().post(`/api/lots/${LOT}/reservations`).set(auth(userToken)).send({ slotNumber: 4 }).expect(201);
     await sync.handleEvent(LOT, { type: 'reservation_expired', slot: 4 });
@@ -413,9 +429,10 @@ describe('Quan tri', () => {
     // thi luot do thuoc ngay hom qua, khong tinh vao thong ke hom nay.
     const vnDate = (ms) => new Date(ms + 7 * 3600 * 1000).toISOString().slice(0, 10);
     const sameDay = vnDate(Date.now() - 61 * 60 * 1000) === vnDate(Date.now());
-    assert.equal(r.body.sessions, sameDay ? 2 : 1);
-    assert.equal(r.body.completedSessions, sameDay ? 1 : 0);
-    assert.equal(r.body.revenue, sameDay ? 20000 : 0);
+    // + 1 luot do ngan o 3 (test khoang cach) -> phi toi thieu 1 gio = 10000
+    assert.equal(r.body.sessions, sameDay ? 3 : 2);
+    assert.equal(r.body.completedSessions, sameDay ? 2 : 1);
+    assert.equal(r.body.revenue, sameDay ? 30000 : 10000);
     assert.equal(r.body.reservations.fulfilled, 1);
     assert.equal(r.body.reservations.expired, 1);
     assert.equal(r.body.occupancyRate, 25);

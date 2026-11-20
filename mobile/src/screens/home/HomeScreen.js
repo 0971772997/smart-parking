@@ -82,25 +82,31 @@ export default function HomeScreen({ navigation }) {
   const [routes, setRoutes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [expandedLotId, setExpandedLotId] = useState(null); // bai dang mo so do o
   const [selectedLotDetail, setSelectedLotDetail] = useState(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const expandedRef = useRef(null);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
-  // Tải dữ liệu toàn diện
+  // Tải dữ liệu toàn diện (kèm sơ đồ ô của bãi đang mở, để màu ô luôn khớp thiết bị)
   const loadData = useCallback(async (isSilent = false) => {
     if (!isSilent) setLoading(true);
+    const lotId = expandedRef.current;
     try {
-      const [lotsRes, resvRes, vehRes, routesRes] = await Promise.allSettled([
+      const [lotsRes, resvRes, vehRes, routesRes, detailRes] = await Promise.allSettled([
         lotsApi.list(),
         reservationsApi.list(),
         vehiclesApi.list(),
         routesApi.list(),
+        lotId ? lotsApi.detail(lotId) : Promise.resolve(null),
       ]);
       if (lotsRes.status === 'fulfilled') setLots(lotsRes.value || []);
       if (resvRes.status === 'fulfilled') setReservations(resvRes.value || []);
       if (vehRes.status === 'fulfilled') setVehicles(vehRes.value || []);
       if (routesRes.status === 'fulfilled') setRoutes(routesRes.value || []);
+      // Bỏ qua kết quả nếu người dùng đã đóng / đổi bãi trong lúc đang tải
+      if (lotId && detailRes.status === 'fulfilled' && expandedRef.current === lotId) setSelectedLotDetail(detailRes.value);
     } catch {
       // bỏ qua lỗi im lặng nếu có
     } finally {
@@ -112,31 +118,35 @@ export default function HomeScreen({ navigation }) {
   useEffect(() => {
     loadData();
     Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
-
-    // Auto sync 25s
-    const interval = setInterval(() => loadData(true), 25000);
-    return () => clearInterval(interval);
   }, [loadData, fadeAnim]);
 
-  // Quay lai tu man hinh Lo trinh (co the vua dat cho / sua lo trinh) -> lam moi im lang
+  // Tự đồng bộ mỗi 10s, chỉ khi màn hình đang hiển thị (sang màn khác thì dừng);
+  // quay lại từ màn Lộ trình (có thể vừa đặt chỗ / sửa) -> làm mới ngay
   const firstFocus = useRef(true);
   useFocusEffect(useCallback(() => {
-    if (firstFocus.current) { firstFocus.current = false; return; }
-    loadData(true);
+    if (firstFocus.current) firstFocus.current = false;
+    else loadData(true);
+    const interval = setInterval(() => loadData(true), 10000);
+    return () => clearInterval(interval);
   }, [loadData]));
 
-  // Chi tiết ô đỗ theo thời gian thực của bãi đỗ
+  // Mở / đóng sơ đồ ô của một bãi
   const viewLotDetail = async (lotId) => {
-    if (selectedLotDetail?.id === lotId) {
-      setSelectedLotDetail(null); // toggle đóng
+    if (expandedRef.current === lotId) {
+      expandedRef.current = null;
+      setExpandedLotId(null);
+      setSelectedLotDetail(null);
       return;
     }
+    expandedRef.current = lotId;
+    setExpandedLotId(lotId);
+    setSelectedLotDetail(null);
     setLoadingDetail(true);
     try {
       const data = await lotsApi.detail(lotId);
-      setSelectedLotDetail(data);
+      if (expandedRef.current === lotId) setSelectedLotDetail(data);
     } catch {
-      setSelectedLotDetail(null);
+      // giữ trống, lần đồng bộ sau sẽ thử lại
     } finally {
       setLoadingDetail(false);
     }
@@ -262,6 +272,7 @@ export default function HomeScreen({ navigation }) {
               {activeTab === 'lots' && (
                 <LotsTabSection
                   lots={lots}
+                  expandedLotId={expandedLotId}
                   selectedDetail={selectedLotDetail}
                   loadingDetail={loadingDetail}
                   onToggleDetail={viewLotDetail}
@@ -409,7 +420,7 @@ function ActiveTicketCard({ resv, lots }) {
 }
 
 /** Tab 1: Danh sách bãi đỗ & Sơ đồ ô */
-function LotsTabSection({ lots, selectedDetail, loadingDetail, onToggleDetail }) {
+function LotsTabSection({ lots, expandedLotId, selectedDetail, loadingDetail, onToggleDetail }) {
   if (lots.length === 0) {
     return <EmptyNotice icon="business-outline" title="Chưa có bãi đỗ nào" subtitle="Hệ thống đang được cập nhật thêm trạm mới." />;
   }
@@ -422,7 +433,7 @@ function LotsTabSection({ lots, selectedDetail, loadingDetail, onToggleDetail })
       </View>
 
       {lots.map((lot) => {
-        const isExpanded = selectedDetail?.id === lot.id;
+        const isExpanded = expandedLotId === lot.id;
         const freeCount = lot.freeSlots ?? 0;
         const total = lot.totalSlots || 0;
         const freeRatio = total ? Math.min(100, Math.round((freeCount / total) * 100)) : 0;
@@ -520,7 +531,12 @@ function LotsTabSection({ lots, selectedDetail, loadingDetail, onToggleDetail })
                   </View>
                 </View>
 
-                {loadingDetail ? (
+                {!lot.online && (
+                  <Text style={styles.slotOfflineNote}>
+                    Bãi đang offline – đây là trạng thái lần cuối thiết bị gửi về.
+                  </Text>
+                )}
+                {loadingDetail && !selectedDetail ? (
                   <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 14 }} />
                 ) : (
                   <View style={styles.slotsRow}>
@@ -538,8 +554,11 @@ function LotsTabSection({ lots, selectedDetail, loadingDetail, onToggleDetail })
                             color={color}
                           />
                           <Text style={[styles.slotItemNum, { color }]}>Ô #{s.slotNumber}</Text>
-                          {s.distanceCm ? (
+                          {/* Chỉ hiện khoảng cách khi có xe (≥ 400 cm = cảm biến không thấy vật) */}
+                          {isOccupied && s.distanceCm && s.distanceCm < 400 ? (
                             <Text style={styles.slotItemDist}>{s.distanceCm} cm</Text>
+                          ) : !isFree && !isOccupied ? (
+                            <Text style={styles.slotItemDist}>Đã đặt trước</Text>
                           ) : (
                             <Text style={styles.slotItemDist}>{isFree ? 'Sẵn sàng' : 'Đang đỗ'}</Text>
                           )}
@@ -921,6 +940,7 @@ const styles = StyleSheet.create({
   },
   slotItemNum: { fontSize: 12, fontWeight: '800' },
   slotItemDist: { fontSize: 10, color: colors.textMuted },
+  slotOfflineNote: { fontSize: 11, color: '#B45309', backgroundColor: '#FFFBEB', padding: 8, borderRadius: 6, marginBottom: 10 },
 
   // History Card
   historyCard: {

@@ -70,8 +70,12 @@ export default function RoutesScreen({ navigation, route }) {
     }
   }, []);
 
-  // Tai lai moi khi quay ve man hinh (sau khi them / sua)
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  // Tai lai moi khi quay ve man hinh (sau khi them / sua) + tu dong bo 10s (so o trong cua bai)
+  useFocusEffect(useCallback(() => {
+    load();
+    const interval = setInterval(load, 10000);
+    return () => clearInterval(interval);
+  }, [load]));
 
   // Nhan thong bao tu man hinh form
   const savedMsg = route.params?.saved;

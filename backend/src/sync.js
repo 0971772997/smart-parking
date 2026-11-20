@@ -10,8 +10,15 @@ const LAST_SEEN_WRITE_MS = 30 * 60 * 1000;
 // Chuyen trang thai 1 o + mo/dong luot do. Tra ve false neu khong co thay doi.
 async function applySlotState(q, lotId, slotNumber, newState, distance) {
   const cur = (await q.query(
-    'SELECT id, state FROM slots WHERE lot_id = $1 AND slot_number = $2 FOR UPDATE', [lotId, slotNumber])).rows[0];
-  if (!cur || cur.state === newState) return false;
+    'SELECT id, state, distance_cm FROM slots WHERE lot_id = $1 AND slot_number = $2 FOR UPDATE', [lotId, slotNumber])).rows[0];
+  if (!cur) return false;
+  if (cur.state === newState) {
+    // Trang thai da dung (vd vua cap nhat tu event 'slot_changed' khong kem khoang cach) -> chi bo sung khoang cach
+    if (Number.isFinite(distance) && Math.round(distance) !== cur.distance_cm) {
+      await q.query('UPDATE slots SET distance_cm = $2 WHERE id = $1', [cur.id, Math.round(distance)]);
+    }
+    return false;
+  }
 
   await q.query(
     'UPDATE slots SET state = $2, distance_cm = COALESCE($3, distance_cm), updated_at = now() WHERE id = $1',
@@ -96,7 +103,8 @@ function createSync(db) {
 
     if (ev.type === 'slot_changed') {
       await db.tx((q) => applySlotState(q, lotId, ev.slot, ev.state));
-      c.slots[ev.slot] = ev.state;
+      // Khong ghi cache: event khong co khoang cach -> de ban tin 'status' ke tiep bo sung (1 lan ghi)
+      delete c.slots[ev.slot];
     } else if (ev.type === 'reservation_expired') {
       await db.query(
         `UPDATE reservations r SET status = 'expired', updated_at = now()
