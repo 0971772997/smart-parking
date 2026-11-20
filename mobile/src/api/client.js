@@ -19,6 +19,14 @@ const MESSAGES = {
   username_taken: 'Tên đăng nhập đã tồn tại.',
   social_not_configured: 'Đăng nhập mạng xã hội chưa được cấu hình trên máy chủ.',
   social_token_invalid: 'Không xác minh được tài khoản mạng xã hội. Vui lòng thử lại.',
+  route_not_found: 'Không tìm thấy lộ trình (có thể đã bị xoá).',
+  route_limit: 'Bạn đã đạt tối đa 20 lộ trình. Hãy xoá bớt lộ trình cũ.',
+  lot_not_found: 'Không tìm thấy bãi đỗ.',
+  vehicle_not_found: 'Xe không thuộc tài khoản của bạn.',
+  already_has_reservation: 'Bạn đang có 1 đặt chỗ chưa dùng.',
+  slot_not_free: 'Ô đỗ vừa có người đặt. Vui lòng thử lại.',
+  device_offline: 'Thiết bị bãi đỗ đang mất kết nối.',
+  device_timeout: 'Thiết bị bãi đỗ không phản hồi. Vui lòng thử lại.',
   internal_error: 'Máy chủ gặp sự cố. Vui lòng thử lại sau.',
 };
 

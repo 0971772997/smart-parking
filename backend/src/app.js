@@ -17,6 +17,7 @@ function createApp({ db, auth, device, otpDevMode = true, social }) {
   app.use('/api/vehicles', require('./routes/vehicles')({ db, auth }));
   app.use('/api/lots', require('./routes/lots')({ db, auth, device }));
   app.use('/api/reservations', require('./routes/reservations')({ db, auth, device }));
+  app.use('/api/routes', require('./routes/driverRoutes')({ db, auth }));
 
   app.use((_req, _res, next) => next(new HttpError(404, 'not_found', 'Khong tim thay API')));
 

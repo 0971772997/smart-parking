@@ -115,3 +115,21 @@ CREATE TABLE IF NOT EXISTS device_events (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_events_lot_time ON device_events (lot_id, created_at DESC);
+
+-- v4: Lo trinh thuong di cua tai xe (vd: Nha -> Cong ty), gan voi bai do dich, xe, gio di, cac ngay lap lai
+CREATE TABLE IF NOT EXISTS driver_routes (
+  id          SERIAL PRIMARY KEY,
+  user_id     INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name        VARCHAR(60)  NOT NULL,
+  origin      VARCHAR(120),
+  lot_id      VARCHAR(50)  NOT NULL REFERENCES parking_lots(id) ON DELETE CASCADE,
+  vehicle_id  INT REFERENCES vehicles(id) ON DELETE SET NULL,
+  depart_time VARCHAR(5)   NOT NULL CHECK (depart_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'),
+  days        SMALLINT[]   NOT NULL DEFAULT '{1,2,3,4,5}',   -- 1 = Thu 2 ... 7 = Chu nhat (ISO)
+  minutes     INT          NOT NULL DEFAULT 15 CHECK (minutes BETWEEN 1 AND 120), -- thoi gian giu cho khi dat nhanh
+  note        VARCHAR(255),
+  active      BOOLEAN      NOT NULL DEFAULT true,
+  created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_driver_routes_user ON driver_routes (user_id, depart_time);

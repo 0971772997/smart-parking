@@ -65,6 +65,10 @@ Khi lỗi, API trả về: `{ "error": "<ma_loi>", "message": "...", "details"?:
 | GET | `/vehicles` | user | Danh sách xe của tôi |
 | POST | `/vehicles` | user | `{plateNumber, brand?, color?}` |
 | DELETE | `/vehicles/:id` | user | Xoá xe |
+| GET | `/routes` | user | Lộ trình thường đi của tôi (kèm `lot` {name, freeSlots, online…}, `vehiclePlate`) |
+| POST | `/routes` | user | `{name, lotId, departTime "HH:MM", days [1..7]=[1..5], origin?, vehicleId?, minutes(1-120)=15, note?, active=true}` (tối đa 20) |
+| PATCH | `/routes/:id` | user | Sửa một phần, vd `{active:false}` |
+| DELETE | `/routes/:id` | user | Xoá lộ trình |
 | GET | `/lots` | – | Danh sách bãi đỗ kèm `freeSlots` |
 | GET | `/lots/:lotId` | – | Chi tiết bãi: online, barie, số ô trống/có xe/đặt, danh sách `slots` |
 | GET | `/lots/:lotId/slots` | – | Danh sách ô |

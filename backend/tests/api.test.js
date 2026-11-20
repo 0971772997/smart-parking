@@ -214,6 +214,56 @@ describe('Xe', () => {
   });
 });
 
+describe('Lo trinh tai xe', () => {
+  let routeId;
+  test('Them lo trinh -> tra ve kem thong tin bai va bien so', async () => {
+    const r = await api().post('/api/routes').set(auth(userToken))
+      .send({ name: 'Nha -> Cong ty', origin: 'Q.7', lotId: LOT, vehicleId, departTime: '07:30', days: [5, 1, 3, 1], minutes: 30 })
+      .expect(201);
+    routeId = r.body.id;
+    assert.deepEqual(r.body.days, [1, 3, 5]);
+    assert.equal(r.body.active, true);
+    assert.equal(r.body.lot.name.length > 0, true);
+    assert.equal(typeof r.body.lot.freeSlots, 'number');
+    assert.equal(r.body.vehiclePlate, '51A-123.45');
+    const d = await api().post('/api/routes').set(auth(userToken))
+      .send({ name: 'Cuoi tuan', lotId: LOT, departTime: '06:05' }).expect(201);
+    assert.deepEqual(d.body.days, [1, 2, 3, 4, 5]);
+    assert.equal(d.body.minutes, 15);
+    const list = await api().get('/api/routes').set(auth(userToken)).expect(200);
+    assert.deepEqual(list.body.map((x) => x.departTime), ['06:05', '07:30']);
+  });
+  test('Validate: gio sai, ngay sai, bai khong ton tai, xe cua nguoi khac, chua dang nhap', async () => {
+    const base = { name: 'X', lotId: LOT, departTime: '08:00' };
+    await api().post('/api/routes').set(auth(userToken)).send({ ...base, departTime: '24:00' }).expect(400);
+    await api().post('/api/routes').set(auth(userToken)).send({ ...base, days: [0] }).expect(400);
+    await api().post('/api/routes').set(auth(userToken)).send({ ...base, days: [] }).expect(400);
+    const nl = await api().post('/api/routes').set(auth(userToken)).send({ ...base, lotId: 'khong-co' }).expect(400);
+    assert.equal(nl.body.error, 'lot_not_found');
+    await api().post('/api/routes').set(auth(user2Token)).send({ ...base, vehicleId }).expect(400);
+    await api().post('/api/routes').send(base).expect(401);
+  });
+  test('Sua mot phan, bat/tat', async () => {
+    const r = await api().patch(`/api/routes/${routeId}`).set(auth(userToken))
+      .send({ active: false, departTime: '08:15', vehicleId: null }).expect(200);
+    assert.equal(r.body.active, false);
+    assert.equal(r.body.departTime, '08:15');
+    assert.equal(r.body.vehicleId, null);
+    assert.equal(r.body.name, 'Nha -> Cong ty');
+    await api().patch(`/api/routes/${routeId}`).set(auth(userToken)).send({}).expect(400);
+    await api().patch(`/api/routes/${routeId}`).set(auth(userToken)).send({ active: 'no' }).expect(400);
+  });
+  test('Nguoi khac khong xem/sua/xoa duoc; xoa thanh cong', async () => {
+    await api().get(`/api/routes/${routeId}`).set(auth(user2Token)).expect(404);
+    await api().patch(`/api/routes/${routeId}`).set(auth(user2Token)).send({ name: 'hack' }).expect(404);
+    await api().delete(`/api/routes/${routeId}`).set(auth(user2Token)).expect(404);
+    const l2 = await api().get('/api/routes').set(auth(user2Token)).expect(200);
+    assert.equal(l2.body.length, 0);
+    await api().delete(`/api/routes/${routeId}`).set(auth(userToken)).expect(204);
+    await api().get(`/api/routes/${routeId}`).set(auth(userToken)).expect(404);
+  });
+});
+
 describe('Bai do', () => {
   test('Danh sach bai do (khong can dang nhap)', async () => {
     const r = await api().get('/api/lots').expect(200);
