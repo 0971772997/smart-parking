@@ -18,7 +18,9 @@ App gọi API trên Render: `src/api/client.js` (`API_URL`).
 | Đăng nhập (UI-001) | `src/screens/auth/LoginScreen.js` | Email + mật khẩu, Lưu ID, Tự động đăng nhập, Quên mật khẩu, nút Google / Facebook, link Đăng ký |
 | Đăng ký (UI-002) | `src/screens/auth/RegisterScreen.js` | Tên đăng nhập, email, số điện thoại, mật khẩu, nhập lại mật khẩu. Kiểm tra từng ô; nếu trùng username/email thì báo ngay dưới ô đó |
 | Quên mật khẩu | `src/screens/auth/FindPasswordScreen.js` | Email → mã OTP (giả lập) → đặt mật khẩu mới |
-| Trang chủ (tạm) | `src/screens/home/HomeScreen.js` | Thông tin tài khoản, đăng xuất |
+| Trang chủ | `src/screens/home/HomeScreen.js` | Tổng quan ô trống, vé đang giữ chỗ, bãi đỗ + sơ đồ ô (tự đồng bộ 10 s), đặt chỗ, xe, hồ sơ, lối tắt Lộ trình |
+| Lộ trình | `src/screens/routes/RoutesScreen.js` | Danh sách lộ trình, mở rộng/thu gọn chi tiết, tìm kiếm, lọc (Hôm nay / Đang bật / Tạm tắt / theo bãi), sắp xếp, bật/tắt, xoá, Đặt chỗ ngay |
+| Thêm / Sửa lộ trình (UI-005) | `src/screens/routes/RouteFormScreen.js` | Tên + gợi ý, điểm đi, bãi đích (số ô trống), giờ đi (gõ `0730`, ±15 phút, giờ gợi ý), ngày lặp, xe (thêm xe ngay tại form), thời gian giữ chỗ + ước tính phí, ghi chú, bật/tắt, xem trước, hỏi lại khi thoát chưa lưu, xoá (khi sửa) |
 
 Lưu trữ: token đăng nhập lưu trong SecureStore. Email đã lưu và các tuỳ chọn lưu trong AsyncStorage.
 
