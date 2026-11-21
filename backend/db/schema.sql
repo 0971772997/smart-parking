@@ -183,3 +183,44 @@ CREATE INDEX IF NOT EXISTS idx_gate_scans_lot_time ON gate_scans (lot_id, create
 -- Moi dat cho chi vao 1 lan / ra 1 lan (chan quet trung, 2 nguoi quet cung luc)
 CREATE UNIQUE INDEX IF NOT EXISTS uq_gate_scan_once
   ON gate_scans (reservation_id, gate) WHERE result IN ('pending', 'granted');
+
+-- v9: Phien gui xe day du (bat dau khi qua cong vao, ket thuc khi ra cong) + thong bao
+--   source   = 'gate'   : mo khi barie cong vao mo cho dat cho (quet QR) -> started_at = luc vao bai
+--              'sensor' : khach vang lai / vao bang nut -> mo khi cam bien thay xe trong o
+--   parked_at    = luc cam bien thay xe trong o
+--   ended_at     = luc CHOT PHI (xe roi o, hoac ra cong khi chua do) -> fee, duration_seconds
+--   exited_at    = luc qua cong ra (ket thuc phien gui xe 'gate')
+--   planned_end_at = het gio gui du kien (tu dat cho, gia han duoc) -> qua gio tinh phu phi
+ALTER TABLE parking_sessions ADD COLUMN IF NOT EXISTS user_id INT REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE parking_sessions ADD COLUMN IF NOT EXISTS vehicle_id INT REFERENCES vehicles(id) ON DELETE SET NULL;
+ALTER TABLE parking_sessions ADD COLUMN IF NOT EXISTS source VARCHAR(10) NOT NULL DEFAULT 'sensor';
+ALTER TABLE parking_sessions ADD COLUMN IF NOT EXISTS parked_at TIMESTAMPTZ;
+ALTER TABLE parking_sessions ADD COLUMN IF NOT EXISTS exited_at TIMESTAMPTZ;
+ALTER TABLE parking_sessions ADD COLUMN IF NOT EXISTS planned_end_at TIMESTAMPTZ;
+ALTER TABLE parking_sessions ADD COLUMN IF NOT EXISTS extend_count INT NOT NULL DEFAULT 0;
+ALTER TABLE parking_sessions ADD COLUMN IF NOT EXISTS overtime_fee INT;            -- VND, phan phu phi qua gio trong fee
+ALTER TABLE parking_sessions ADD COLUMN IF NOT EXISTS flags TEXT[] NOT NULL DEFAULT '{}'; -- wrong_slot, sensor_gap ...
+ALTER TABLE parking_sessions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+UPDATE parking_sessions SET parked_at = started_at WHERE parked_at IS NULL AND source = 'sensor';
+UPDATE parking_sessions ps SET user_id = r.user_id, vehicle_id = r.vehicle_id
+FROM reservations r WHERE r.id = ps.reservation_id AND ps.user_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON parking_sessions (user_id, started_at DESC);
+-- Moi dat cho chi mo 1 phien gui xe
+CREATE UNIQUE INDEX IF NOT EXISTS uq_session_reservation ON parking_sessions (reservation_id) WHERE reservation_id IS NOT NULL;
+
+-- Thong bao trong app (phien gui xe, thay doi chi phi, dat cho het han...)
+-- dedupe_key: moi su kien chi bao 1 lan (vd 's12:fee:3' = phi phien 12 len muc 3 gio)
+CREATE TABLE IF NOT EXISTS notifications (
+  id             BIGSERIAL PRIMARY KEY,
+  user_id        INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  session_id     INT REFERENCES parking_sessions(id) ON DELETE CASCADE,
+  reservation_id INT REFERENCES reservations(id) ON DELETE CASCADE,
+  type           VARCHAR(30) NOT NULL,
+  title          VARCHAR(120) NOT NULL,
+  body           TEXT,
+  data           JSONB NOT NULL DEFAULT '{}',
+  dedupe_key     VARCHAR(80) UNIQUE,
+  read_at        TIMESTAMPTZ,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (user_id, id DESC);

@@ -10,6 +10,7 @@
 //        nhan vien quet -> POST /api/gates/scan -> kiem tra -> lenh open_gate toi ESP32 -> ack ok = xac nhan
 const crypto = require('crypto');
 const { RULES } = require('./booking');
+const { sessionFee, startGateSession, closeSession, notify, vnd } = require('./sessions');
 
 const VERSION = 'SP1';
 const GATE_CODE = { entry: 'E', exit: 'X' };
@@ -53,8 +54,9 @@ function createGatePass(secret) {
 // Luot do gan nhat cua dat cho (kem thanh toan) -> de kiem tra cong ra
 async function lastSession(db, reservationId) {
   return db.one(
-    `SELECT ps.id, ps.ended_at, ps.fee, p.id AS payment_id
+    `SELECT ps.*, p.id AS payment_id, l.price_per_hour
      FROM parking_sessions ps LEFT JOIN payments p ON p.session_id = ps.id
+     JOIN slots s ON s.id = ps.slot_id JOIN parking_lots l ON l.id = s.lot_id
      WHERE ps.reservation_id = $1 ORDER BY ps.started_at DESC LIMIT 1`, [reservationId]);
 }
 
@@ -85,13 +87,18 @@ function gateBlock(r, gate) {
   return 'reservation_not_active';
 }
 
-// Dieu kien phi o cong ra: xe phai da roi o (luot do da dong) va da thanh toan
+// Dieu kien phi o cong ra: xe phai da roi o (phien da chot phi) va da thanh toan
+//   - Vao bai nhung chua do o nao: mien phi neu ra trong RULES.session.noParkGraceMinutes, qua thi tinh phi tu luc vao
 //   -> null | { error: 'still_parked' | 'payment_required', sessionId, fee }
 async function exitBlock(db, reservationId) {
   const s = await lastSession(db, reservationId);
-  if (!s) return null; // vao bai nhung chua do o nao -> ra mien phi
-  if (!s.ended_at) return { error: 'still_parked', sessionId: s.id, fee: null };
-  if (!s.payment_id && (s.fee || 0) > 0) return { error: 'payment_required', sessionId: s.id, fee: s.fee };
+  if (!s || s.payment_id) return null;
+  if (!s.ended_at) {
+    if (s.parked_at) return { error: 'still_parked', sessionId: s.id, fee: null };
+    const fee = sessionFee({ startedAt: s.started_at, pricePerHour: s.price_per_hour, plannedEndAt: s.planned_end_at, parked: false });
+    return fee.total > 0 ? { error: 'payment_required', sessionId: s.id, fee: fee.total } : null;
+  }
+  if ((s.fee || 0) > 0) return { error: 'payment_required', sessionId: s.id, fee: s.fee };
   return null;
 }
 
@@ -112,6 +119,22 @@ async function confirmScan(db, requestId) {
   const col = scan.gate === 'entry' ? 'entered_at' : 'exited_at';
   await db.query(`UPDATE reservations SET ${col} = COALESCE(${col}, now()), updated_at = now() WHERE id = $1`,
     [scan.reservation_id]);
+  if (scan.gate === 'entry') {
+    scan.session = await startGateSession(db, scan.reservation_id); // bat dau phien gui xe
+  } else {
+    // Ket thuc phien gui xe: chot phi neu chua (vao bai roi ra luon), ghi luc ra cong
+    const s = await db.one(
+      'SELECT id, ended_at FROM parking_sessions WHERE reservation_id = $1 AND exited_at IS NULL', [scan.reservation_id]);
+    if (s) {
+      if (!s.ended_at) await closeSession(db, s.id);
+      const done = await db.one(
+        `UPDATE parking_sessions SET exited_at = now(), updated_at = now() WHERE id = $1 RETURNING *`, [s.id]);
+      await notify(db, { userId: done.user_id, sessionId: done.id, reservationId: scan.reservation_id, type: 'exited',
+        key: `s${done.id}:exit`, title: 'Kết thúc phiên gửi xe',
+        body: `Xe đã ra bãi. Tổng phí ${vnd(done.fee)}. Cảm ơn bạn đã sử dụng SmartPark!`, data: { fee: done.fee } });
+      scan.session = done;
+    }
+  }
   if (scan.gate === 'exit') {
     // Qua cong vao nhung roi bai ma chua do -> tra o dang giu
     const r = await db.one(

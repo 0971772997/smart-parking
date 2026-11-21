@@ -3,6 +3,7 @@ const config = require('./config');
 const { createDb } = require('./db');
 const { createAuth } = require('./auth');
 const { createSync } = require('./sync');
+const { createLiveHub } = require('./live');
 const { createMqttBridge } = require('./mqttBridge');
 const { createApp } = require('./app');
 const { createSocialVerifier } = require('./social');
@@ -23,11 +24,12 @@ async function main() {
   await db.migrate();
   await ensureAdmin(db);
 
-  const sync = createSync(db);
+  const live = createLiveHub();
+  const sync = createSync(db, { live });
   const device = createMqttBridge(config.mqtt, sync, { timeoutMs: config.deviceTimeoutMs });
   sync.attachDevice(device);
   const app = createApp({ db, auth: createAuth(config), device, otpDevMode: config.otpDevMode,
-    social: createSocialVerifier(config.social), gatePass: createGatePass(config.jwtSecret) });
+    social: createSocialVerifier(config.social), gatePass: createGatePass(config.jwtSecret), live });
 
   const server = app.listen(config.port, () => console.log(`[API] Dang chay tai cong ${config.port}`));
 

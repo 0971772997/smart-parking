@@ -111,6 +111,8 @@ module.exports = function gateRoutes({ db, auth, device, gatePass }) {
       gate,
       scanId: scan.id,
       confirmedAt: confirmed.confirmed_at,
+      sessionId: confirmed.session?.id ?? fresh.session_id ?? null,
+      fee: gate === 'exit' ? confirmed.session?.fee ?? null : null,
       message: gate === 'entry'
         ? `Moi xe vao. Den khu ${resv.zone || '-'}, o so ${resv.slot_number}`
         : 'Hen gap lai!',

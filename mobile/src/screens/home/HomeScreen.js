@@ -26,6 +26,10 @@ import { lotsApi } from '../../api/lots';
 import { reservationsApi } from '../../api/reservations';
 import { vehiclesApi } from '../../api/vehicles';
 import { authApi } from '../../api/auth';
+import { sessionsApi } from '../../api/sessions';
+import { useLive, useOnLiveChange } from '../../context/LiveContext';
+import OfflineBanner from '../../components/OfflineBanner';
+import ActiveSessionCard from '../../components/ActiveSessionCard';
 import { colors, radius, shadow } from '../../theme';
 import { useFocusEffect } from '@react-navigation/native';
 
@@ -102,6 +106,8 @@ const RESV_CONFIG = {
 // =====================================================================
 export default function HomeScreen({ navigation }) {
   const { user, signOut, updateUser } = useAuth();
+  const { unread, lots: liveLots } = useLive();
+  const [activeSession, setActiveSession] = useState(null);
   const [activeTab, setActiveTab] = useState('lots');
   const [lots, setLots] = useState([]);
   const [reservations, setReservations] = useState([]);
@@ -134,14 +140,16 @@ export default function HomeScreen({ navigation }) {
   const loadData = useCallback(async (isSilent = false) => {
     if (!isSilent) setLoading(true);
     try {
-      const [lotsRes, resvRes, vehRes] = await Promise.allSettled([
+      const [lotsRes, resvRes, vehRes, sesRes] = await Promise.allSettled([
         lotsApi.list(),
         reservationsApi.list(),
         vehiclesApi.list(),
+        sessionsApi.active(),
       ]);
       if (lotsRes.status === 'fulfilled') setLots(lotsRes.value || []);
       if (resvRes.status === 'fulfilled') setReservations(resvRes.value || []);
       if (vehRes.status === 'fulfilled') setVehicles(vehRes.value || []);
+      if (sesRes.status === 'fulfilled') setActiveSession(sesRes.value?.session || null);
     } catch {
       // bỏ qua lỗi im lặng nếu có
     } finally {
@@ -158,10 +166,14 @@ export default function HomeScreen({ navigation }) {
   useFocusEffect(
     useCallback(() => {
       loadData(true);
-      const interval = setInterval(() => loadData(true), 12000);
+      // Du phong (thoi gian thuc da co LiveContext): 30s/lan
+      const interval = setInterval(() => loadData(true), 30000);
       return () => clearInterval(interval);
     }, [loadData])
   );
+
+  // O do / barie / dat cho / phien gui xe thay doi tren may chu -> tai lai ngay
+  useOnLiveChange(useCallback(() => loadData(true), [loadData]));
 
   // Lấy vị trí GPS hiện tại của người dùng
   const handleGetLocation = () => {
@@ -322,8 +334,10 @@ export default function HomeScreen({ navigation }) {
 
   // Vé đang hiệu lực
   const activeReservation = useMemo(() => {
-    return reservations.find((r) => r.status === 'active' || r.status === 'pending');
-  }, [reservations]);
+    // Da qua cong vao -> hien the phien gui xe thay cho ve giu cho
+    return reservations.find((r) => (r.status === 'active' || r.status === 'pending')
+      && !(activeSession && activeSession.reservationId === r.id));
+  }, [reservations, activeSession]);
 
   // Tóm tắt hệ thống
   const summary = useMemo(() => {
@@ -331,8 +345,9 @@ export default function HomeScreen({ navigation }) {
     const totalCap = lots.reduce((acc, l) => acc + (l.totalSlots || 0), 0);
     const totalOccupied = Math.max(0, totalCap - totalFree);
     const onlineCount = lots.filter((l) => l.online).length;
-    return { totalFree, totalCap, totalOccupied, onlineCount };
-  }, [lots]);
+    const carsInLot = liveLots.reduce((acc, l) => acc + (l.carsInLot || 0), 0);
+    return { totalFree, totalCap, totalOccupied, onlineCount, carsInLot };
+  }, [lots, liveLots]);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -380,6 +395,20 @@ export default function HomeScreen({ navigation }) {
             )}
 
             <Pressable
+              onPress={() => navigation.navigate('Notifications')}
+              style={({ pressed }) => [styles.iconBtn, pressed && styles.btnPressed]}
+              accessibilityLabel={unread ? `Thông báo, ${unread} chưa đọc` : 'Thông báo'}
+              hitSlop={8}
+            >
+              <Ionicons name={unread ? 'notifications' : 'notifications-outline'} size={18} color={unread ? colors.primary : colors.textMuted} />
+              {unread > 0 && (
+                <View style={styles.bellBadge}>
+                  <Text style={styles.bellBadgeText}>{unread > 9 ? '9+' : unread}</Text>
+                </View>
+              )}
+            </Pressable>
+
+            <Pressable
               onPress={handleLogout}
               style={({ pressed }) => [styles.iconBtn, pressed && styles.btnPressed]}
               accessibilityLabel="Đăng xuất"
@@ -389,6 +418,8 @@ export default function HomeScreen({ navigation }) {
             </Pressable>
           </View>
         </View>
+
+        <OfflineBanner />
 
         <ScrollView
           style={styles.container}
@@ -407,6 +438,12 @@ export default function HomeScreen({ navigation }) {
         >
           <Animated.View style={{ opacity: fadeAnim }}>
             {/* HERO SECTION: VÉ HOẠT ĐỘNG HOẶC TỔNG QUAN HỆ THỐNG */}
+            {activeSession ? (
+              <ActiveSessionCard
+                session={activeSession}
+                onPress={() => navigation.navigate('SessionDetail', { id: activeSession.id })}
+              />
+            ) : null}
             {activeReservation ? (
               <ActiveTicketCard
                 resv={activeReservation}
@@ -415,7 +452,7 @@ export default function HomeScreen({ navigation }) {
                   navigation.navigate('ReservationDetail', { id: activeReservation.id, initial: activeReservation })
                 }
               />
-            ) : (
+            ) : activeSession ? null : (
               <CompactSummaryCard
                 summary={summary}
                 onViewMap={() => navigation.navigate('SetupParkingLot')}
@@ -637,7 +674,7 @@ function CompactSummaryCard({ summary, onViewMap }) {
           <Ionicons name="sparkles" size={13} color="#38BDF8" />
           <Text style={styles.heroBadgeText}>Hệ thống Bãi đỗ Thông minh IoT</Text>
         </View>
-        <Text style={styles.heroSubText}>Đồng bộ tức thời 24/7</Text>
+        <Text style={styles.heroSubText}>{summary.carsInLot} xe đang trong bãi • trực tiếp</Text>
       </View>
 
       <View style={styles.heroStatsRow}>
@@ -1232,6 +1269,11 @@ const styles = StyleSheet.create({
   dotGreen: { backgroundColor: '#10B981' },
   dotGray: { backgroundColor: '#94A3B8' },
   statusPillText: { fontSize: 11, color: colors.textMuted, fontWeight: '600' },
+  bellBadge: {
+    position: 'absolute', top: -3, right: -3, minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 3,
+    backgroundColor: '#DC2626', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: '#fff',
+  },
+  bellBadgeText: { color: '#fff', fontSize: 9, fontWeight: '900' },
   iconBtn: {
     width: 34,
     height: 34,

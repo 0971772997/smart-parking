@@ -13,6 +13,8 @@ import ConfirmDialog from '../../components/ConfirmDialog';
 import Notice from '../../components/Notice';
 import GatePassCard from '../../components/GatePassCard';
 import { reservationsApi } from '../../api/reservations';
+import { useOnLiveChange } from '../../context/LiveContext';
+import OfflineBanner from '../../components/OfflineBanner';
 import { colors, radius } from '../../theme';
 import { formatDuration, formatVND } from '../../utils/schedules';
 import {
@@ -48,9 +50,9 @@ export default function ReservationDetailScreen({ navigation, route }) {
       if (prev && !g.exitedAt && r.exitedAt) {
         setNotice({ type: 'success', text: 'Đã xác nhận xe ra bãi. Cảm ơn bạn đã sử dụng SmartPark!' });
       } else if (prev && !g.enteredAt && r.enteredAt) {
-        setNotice({ type: 'success', text: `Barie đã mở – xe đã qua cổng vào. Mời đến khu ${r.zone || '—'}, ô #${r.slotNumber}.` });
+        setNotice({ type: 'success', text: `Barie đã mở – phiên gửi xe đã bắt đầu. Mời đến khu ${r.zone || '—'}, ô #${r.slotNumber}.` });
       } else if (prev && prev !== r.status && r.status === 'fulfilled') {
-        setNotice({ type: 'success', text: 'Xe đã vào đúng ô. Lượt đặt chỗ hoàn tất, bắt đầu tính phí gửi xe.' });
+        setNotice({ type: 'success', text: 'Xe đã vào đúng ô. Lượt đặt chỗ hoàn tất.' });
       } else if (prev && prev !== r.status && r.status === 'expired') {
         setNotice({ type: 'error', text: 'Đã quá giờ giữ chỗ nên ô được trả lại.' });
       }
@@ -62,6 +64,8 @@ export default function ReservationDetailScreen({ navigation, route }) {
       setRefreshing(false);
     }
   }, [id]);
+
+  useOnLiveChange(load); // barie / cam bien doi -> cap nhat ngay
 
   useEffect(() => {
     load();
@@ -163,6 +167,7 @@ export default function ReservationDetailScreen({ navigation, route }) {
       <StatusBar style="dark" />
       <View style={styles.webContainer}>
         {header}
+        <OfflineBanner />
         <ScrollView contentContainerStyle={styles.content}
           refreshControl={<RefreshControl refreshing={refreshing} tintColor={colors.primary} onRefresh={() => { setRefreshing(true); load(); }} />}>
           {notice ? <Notice type={notice.type}>{notice.text}</Notice> : null}
@@ -203,8 +208,21 @@ export default function ReservationDetailScreen({ navigation, route }) {
           </View>
         </View>
 
-        {/* MA QR QUA CONG */}
-        {resv.nextGate ? <GatePassCard resv={resv} onChanged={load} /> : null}
+        {/* PHIEN GUI XE (bat dau khi qua cong vao) */}
+        {resv.sessionId ? (
+          <Pressable onPress={() => navigation.navigate('SessionDetail', { id: resv.sessionId })}
+            style={({ pressed }) => [styles.sessionLink, pressed && { opacity: 0.85 }]} accessibilityRole="button">
+            <Ionicons name="car-sport" size={20} color={colors.success} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.sessionTitle}>{resv.exitedAt ? 'Xem lại phiên gửi xe' : 'Phiên gửi xe đang hoạt động'}</Text>
+              <Text style={styles.sessionSub}>Thời gian gửi, phí hiện tại, gia hạn, thanh toán & mã QR cổng ra</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.success} />
+          </Pressable>
+        ) : null}
+
+        {/* MA QR QUA CONG (cong ra: hien trong man Phien gui xe neu da co phien) */}
+        {resv.nextGate && !(resv.sessionId && resv.nextGate === 'exit') ? <GatePassCard resv={resv} onChanged={load} /> : null}
 
         {/* THONG TIN */}
         <View style={styles.card}>
@@ -225,14 +243,14 @@ export default function ReservationDetailScreen({ navigation, route }) {
           <Step done={!!resv.confirmedAt} failed={resv.status === 'failed'}
             label={resv.status === 'failed' ? 'Thiết bị không xác nhận' : 'Thiết bị xác nhận giữ ô'} time={resv.confirmedAt} />
           {resv.enteredAt || resv.nextGate === 'entry' ? (
-            <Step done={!!resv.enteredAt} label={resv.enteredAt ? 'Quét mã – barie cổng vào đã mở' : 'Quét mã QR tại cổng vào'} time={resv.enteredAt} />
+            <Step done={!!resv.enteredAt} label={resv.enteredAt ? 'Qua cổng vào – bắt đầu phiên gửi xe & tính phí' : 'Quét mã QR tại cổng vào'} time={resv.enteredAt} />
           ) : null}
           <Step
             last={!(resv.enteredAt || resv.status === 'fulfilled')}
             done={resv.status === 'fulfilled'}
             failed={['cancelled', 'expired'].includes(resv.status)}
             label={{
-              fulfilled: 'Xe đã vào ô – bắt đầu tính phí',
+              fulfilled: 'Xe đã vào ô đỗ',
               cancelled: 'Đã huỷ đặt chỗ',
               expired: 'Hết giờ giữ chỗ (không đến)',
             }[resv.status] || 'Chờ xe vào đúng ô'}
@@ -394,4 +412,7 @@ const styles = StyleSheet.create({
   extText: { color: colors.primary, fontWeight: '800', fontSize: 14 },
 
   actions: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  sessionLink: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, marginBottom: 12, borderRadius: radius.lg, backgroundColor: colors.successSoft, borderWidth: 1, borderColor: '#BBF7D0' },
+  sessionTitle: { fontSize: 14, fontWeight: '800', color: '#166534' },
+  sessionSub: { fontSize: 12, color: '#15803D', marginTop: 2 },
 });

@@ -1,5 +1,11 @@
 // Goi API backend (Render). Loi tu server duoc doi thanh thong bao tieng Viet theo ma loi.
-export const API_URL = 'https://smart-parking-api-2ro3.onrender.com/api';
+import { Platform } from 'react-native';
+
+const PROD_API_URL = 'https://smart-parking-api-2ro3.onrender.com/api';
+// Chi khi phat trien tren web: localStorage.sp_api_url = 'http://localhost:3100/api' -> test voi API chay tren may
+// (khong anh huong app tren dien thoai / ban build)
+const DEV_API_URL = __DEV__ && Platform.OS === 'web' ? globalThis.localStorage?.getItem('sp_api_url') : null;
+export const API_URL = DEV_API_URL || PROD_API_URL;
 
 const MESSAGES = {
   network_error: 'Không kết nối được máy chủ. Kiểm tra Internet và thử lại.',
@@ -52,6 +58,9 @@ const MESSAGES = {
   payment_required: 'Chưa thanh toán phí gửi xe.',
   scan_in_progress: 'Mã này đang được xử lý ở một lần quét khác.',
   session_not_found: 'Không tìm thấy lượt đỗ.',
+  session_ended: 'Phiên gửi xe đã kết thúc.',
+  session_not_extendable: 'Phiên gửi xe này không gia hạn được.',
+  extend_too_long: 'Tổng thời gian gửi xe tối đa 24 giờ.',
   session_not_ended: 'Xe chưa rời bãi, chưa thanh toán được.',
   already_paid: 'Lượt đỗ này đã được thanh toán.',
   invalid_gate: 'Cổng không hợp lệ.',

@@ -2,12 +2,21 @@ const express = require('express');
 const cors = require('cors');
 const { HttpError } = require('./errors');
 const { createGatePass } = require('./gatePass');
+const { createLiveHub } = require('./live');
 
-function createApp({ db, auth, device, otpDevMode = true, social, gatePass = createGatePass('dev-qr-secret') }) {
+// Thao tac lam thay doi bai do / dat cho / phien gui xe -> bao app dang cho cap nhat (long-poll)
+const LIVE_PATHS = /^\/api\/(lots|reservations|gates|sessions|payments)\b/;
+
+function createApp({ db, auth, device, otpDevMode = true, social, gatePass = createGatePass('dev-qr-secret'),
+  live = createLiveHub() }) {
   const app = express();
   app.disable('x-powered-by');
   app.use(cors());
   app.use(express.json({ limit: '100kb' }));
+  app.use((req, res, next) => {
+    if (req.method !== 'GET' && LIVE_PATHS.test(req.path)) res.on('finish', () => res.statusCode < 400 && live.bump());
+    next();
+  });
 
   app.get('/', (_req, res) => res.json({ name: 'Smart Parking API', docs: '/api/health' }));
   app.get('/api/health', async (_req, res) => {
@@ -20,6 +29,8 @@ function createApp({ db, auth, device, otpDevMode = true, social, gatePass = cre
   app.use('/api/reservations', require('./routes/reservations')({ db, auth, device, gatePass }));
   app.use('/api/gates', require('./routes/gates')({ db, auth, device, gatePass }));
   app.use('/api/schedules', require('./routes/schedules')({ db, auth }));
+  app.use('/api', require('./routes/live')({ db, live }));
+  app.use('/api', require('./routes/sessions')({ db, auth }));
   app.use('/api', require('./routes/payments')({ db, auth }));
 
   app.use((_req, _res, next) => next(new HttpError(404, 'not_found', 'Khong tim thay API')));

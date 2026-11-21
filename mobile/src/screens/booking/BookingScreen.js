@@ -432,7 +432,8 @@ export function RulesBox({ rules }) {
     `Gia hạn tối đa ${rules.extend.maxTimes} lần, mỗi lần ≤ ${rules.extend.max} phút, khi chỗ còn đang giữ.`,
     'Huỷ miễn phí bất cứ lúc nào trước khi xe vào ô.',
     `Quá giờ giữ chỗ mà xe chưa vào ô → hết hạn, tính 1 lần không đến. ${rules.noShow.limit} lần trong ${rules.noShow.windowDays} ngày → tạm khoá đặt chỗ ${rules.noShow.suspendHours} giờ.`,
-    'Xe vào đúng ô đã đặt → lượt đặt hoàn tất, bắt đầu tính phí gửi xe.',
+    'Quét mã QR qua cổng vào → bắt đầu phiên gửi xe, phí tính từ lúc vào bãi (làm tròn lên theo giờ, tối thiểu 1 giờ).',
+    'Gửi quá giờ dự kiến hơn 5 phút → phụ phí 50% giá/giờ cho mỗi giờ quá hạn. Có thể gia hạn miễn phí trong phiên gửi xe.',
   ];
   return (
     <View style={styles.rules}>

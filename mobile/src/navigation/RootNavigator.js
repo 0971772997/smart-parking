@@ -10,6 +10,8 @@ import SetupParkingLotScreen from '../screens/parking/SetupParkingLotScreen';
 import BookingScreen from '../screens/booking/BookingScreen';
 import ReservationDetailScreen from '../screens/booking/ReservationDetailScreen';
 import GateScannerScreen from '../screens/gate/GateScannerScreen';
+import SessionDetailScreen from '../screens/session/SessionDetailScreen';
+import NotificationsScreen from '../screens/notifications/NotificationsScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -27,6 +29,8 @@ export default function RootNavigator() {
       <Stack.Screen name="Booking" component={BookingScreen} options={{ title: 'Đặt chỗ' }} />
       <Stack.Screen name="ReservationDetail" component={ReservationDetailScreen} options={{ title: 'Chi tiết đặt chỗ' }} />
       <Stack.Screen name="GateScanner" component={GateScannerScreen} options={{ title: 'Quét mã tại cổng' }} />
+      <Stack.Screen name="SessionDetail" component={SessionDetailScreen} options={{ title: 'Phiên gửi xe' }} />
+      <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Thông báo' }} />
     </Stack.Navigator>
   );
 }

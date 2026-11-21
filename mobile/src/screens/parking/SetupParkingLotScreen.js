@@ -19,6 +19,8 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { lotsApi } from '../../api/lots';
 import { useAuth } from '../../context/AuthContext';
+import LiveLotPanel from '../../components/LiveLotPanel';
+import OfflineBanner from '../../components/OfflineBanner';
 import { colors, radius, shadow } from '../../theme';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -323,6 +325,7 @@ export default function SetupParkingLotScreen({ navigation, route }) {
           </Pressable>
         </View>
 
+        <OfflineBanner />
         <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
           {/* SEARCH LOCATION ON MAP */}
           <View style={styles.searchBar}>
@@ -583,6 +586,17 @@ export default function SetupParkingLotScreen({ navigation, route }) {
               </View>
             )}
           </View>
+
+          {/* HOAT DONG THOI GIAN THUC: cam bien + barie -> cap nhat so do o ngay khi co thay doi */}
+          {activeLotId ? (
+            <LiveLotPanel
+              lotId={activeLotId}
+              onData={(d) => setActiveLotDetail((prev) => (prev && prev.id === d.id
+                ? { ...prev, slots: d.slots, freeSlots: d.freeSlots, occupiedSlots: d.occupiedSlots,
+                  reservedSlots: d.reservedSlots, online: d.online, gates: d.gates }
+                : prev))}
+            />
+          ) : null}
 
           {/* DỰ TÍNH LỘ TRÌNH & CHI PHÍ ĐỖ XE */}
           <View style={styles.card}>

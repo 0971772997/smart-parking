@@ -19,6 +19,16 @@ const RULES = {
   noShow: { limit: 3, windowDays: 7, suspendHours: 24 },   // 3 lan khong den trong 7 ngay -> khoa dat cho 24 gio
   // Ma QR qua cong: song 120s (app tu lam moi), ma ra bai dung duoc trong 48 gio ke tu luc dat
   gate: { qrTtlSeconds: 120, refreshBeforeSeconds: 20, exitWithinHours: 48 },
+  // Phien gui xe (src/sessions.js): bat dau khi barie cong vao mo, phi tinh tu luc vao bai
+  session: {
+    extend: { options: [30, 60, 120], maxTimes: 5, maxTotalMinutes: 1440 }, // gia han thoi gian gui du kien
+    overtimeGraceMinutes: 5,  // qua gio du kien > 5 phut moi tinh phu phi
+    overtimeRate: 0.5,        // phu phi = 50% gia/gio cho moi gio (bat dau) qua gio du kien
+    nearEndMinutes: 15,       // bao truoc khi het gio gui du kien
+    noParkGraceMinutes: 15,   // vao bai roi ra luon (chua do o nao) trong 15 phut -> mien phi
+    noParkAlertMinutes: 20,   // vao bai qua 20 phut chua do o nao -> nhac tai xe
+    reparkWindowMinutes: 2,   // cam bien bao xe roi o roi thay lai trong 2 phut (chap chon / lui xe) -> noi tiep phien
+  },
 };
 
 // Ma dat cho de doi chieu tai cong, vd DC-7KQ2XA (bo 0/O/1/I de de doc)
@@ -35,14 +45,27 @@ const estimateFee = (pricePerHour, durationMinutes) =>
 // Het han "luoi": goi truoc moi lan doc/dat cho thay vi chay dinh ky
 // (tranh danh thuc Neon moi 30s khi khong ai dung app). Thiet bi van tu het han theo dong ho rieng
 // va gui 'reservation_expired' - day chi la luoi an toan khi mat su kien / thiet bi offline.
+// Thong bao "dat cho het han" cho cac dat cho vua chuyen 'expired' (moi dat cho bao 1 lan)
+async function notifyExpired(q, ids) {
+  if (!ids.length) return;
+  await q.query(
+    `INSERT INTO notifications (user_id, reservation_id, type, title, body, data, dedupe_key)
+     SELECT r.user_id, r.id, 'reservation_expired', 'Đặt chỗ đã hết hạn',
+            'Đã quá giờ giữ chỗ nhưng xe chưa đến nên ô #' || s.slot_number || ' được trả lại cho bãi. Lần này được tính là không đến.',
+            jsonb_build_object('slotNumber', s.slot_number, 'code', r.code), 'r' || r.id || ':expired'
+     FROM reservations r JOIN slots s ON s.id = r.slot_id WHERE r.id = ANY($1)
+     ON CONFLICT (dedupe_key) DO NOTHING`, [ids]);
+}
+
 async function expireStale(db) {
   const { rows } = await db.query(
     `UPDATE reservations SET status = 'expired', error = COALESCE(error, 'no_show'), updated_at = now()
      WHERE status = 'active' AND entered_at IS NULL AND expires_at < now() - make_interval(secs => $1)
-     RETURNING slot_id`, [RULES.graceSeconds]);
+     RETURNING id, slot_id`, [RULES.graceSeconds]);
   if (rows.length) {
     await db.query(`UPDATE slots SET state = 'free', updated_at = now() WHERE id = ANY($1) AND state = 'reserved'`,
       [rows.map((r) => r.slot_id)]);
+    await notifyExpired(db, rows.map((r) => r.id));
   }
   await db.query(
     `UPDATE reservations SET status = 'failed', error = 'pending_timeout', updated_at = now()
@@ -68,10 +91,11 @@ const zoneSql = (slotNumberExpr, totalExpr) =>
 // Dat cho kem bai, khu vuc, o, bien so (dung cho danh sach / chi tiet / ket qua dat)
 const RESERVATION_SELECT = `
   SELECT r.*, s.lot_id, s.slot_number, s.zone, l.online, l.name AS lot_name, l.address AS lot_address,
-         veh.plate_number AS vehicle_plate
+         veh.plate_number AS vehicle_plate,
+         (SELECT ps.id FROM parking_sessions ps WHERE ps.reservation_id = r.id) AS session_id
   FROM reservations r
   JOIN slots s ON s.id = r.slot_id
   JOIN parking_lots l ON l.id = s.lot_id
   LEFT JOIN vehicles veh ON veh.id = r.vehicle_id`;
 
-module.exports = { RULES, RESERVATION_SELECT, newCode, estimateFee, expireStale, suspension, zoneSql };
+module.exports = { RULES, RESERVATION_SELECT, newCode, estimateFee, expireStale, notifyExpired, suspension, zoneSql };

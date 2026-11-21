@@ -33,16 +33,19 @@ const reservation = (r) => {
     status: r.status, minutes: r.minutes, holdMinutes: r.minutes, durationMinutes: r.duration_minutes,
     estimatedFee: r.estimated_fee, extendCount: r.extend_count ?? 0, error: r.error,
     confirmedAt: r.confirmed_at, expiresAt: r.expires_at, createdAt: r.created_at, updatedAt: r.updated_at,
-    enteredAt: r.entered_at ?? null, exitedAt: r.exited_at ?? null,
+    enteredAt: r.entered_at ?? null, exitedAt: r.exited_at ?? null, sessionId: r.session_id ?? null,
     nextGate: nextGate(r), // 'entry' | 'exit' | null -> app hien ma QR qua cong tuong ung
     canCancel: r.status === 'active',
     canExtend: !!live && (r.extend_count ?? 0) < RULES.extend.maxTimes,
   };
 };
 
+// Luot do (danh sach quan tri). Chi tiet day du cho tai xe: sessionView trong src/sessions.js
 const session = (s) => s && ({
-  id: s.id, slotNumber: s.slot_number, reservationId: s.reservation_id, startedAt: s.started_at,
-  endedAt: s.ended_at, durationSeconds: s.duration_seconds, fee: s.fee,
+  id: s.id, slotNumber: s.slot_number, reservationId: s.reservation_id, userId: s.user_id ?? null,
+  source: s.source, startedAt: s.started_at, parkedAt: s.parked_at ?? null,
+  endedAt: s.ended_at, exitedAt: s.exited_at ?? null, plannedEndAt: s.planned_end_at ?? null,
+  durationSeconds: s.duration_seconds, fee: s.fee, overtimeFee: s.overtime_fee ?? null, flags: s.flags || [],
 });
 
 const schedule = (d) => d && ({
@@ -53,16 +56,6 @@ const schedule = (d) => d && ({
     totalSlots: d.lot_total_slots, freeSlots: Number(d.lot_free_slots),
   },
   vehiclePlate: d.vehicle_plate ?? null, createdAt: d.created_at, updatedAt: d.updated_at,
-});
-
-// Luot do cua tai xe: trang thai parking (dang do) / unpaid (cho thanh toan) / paid
-const mySession = (s) => s && ({
-  id: s.id, lotId: s.lot_id, lotName: s.lot_name, slotNumber: s.slot_number, reservationId: s.reservation_id,
-  startedAt: s.started_at, endedAt: s.ended_at, durationSeconds: s.duration_seconds,
-  fee: s.ended_at ? s.fee : null,
-  estimatedFee: s.ended_at ? null : Number(s.running_fee),
-  status: !s.ended_at ? 'parking' : s.payment_id ? 'paid' : 'unpaid',
-  payment: s.payment_id ? { id: s.payment_id, code: s.payment_code, method: s.payment_method, paidAt: s.paid_at } : null,
 });
 
 const payment = (p) => p && ({
@@ -79,4 +72,4 @@ const gateScan = (g) => g && ({
   scannedBy: g.scanned_by, createdAt: g.created_at, confirmedAt: g.confirmed_at,
 });
 
-module.exports = { gateScan, user, vehicle, lot, slot, reservation, session, schedule, mySession, payment };
+module.exports = { gateScan, user, vehicle, lot, slot, reservation, session, schedule, payment };
