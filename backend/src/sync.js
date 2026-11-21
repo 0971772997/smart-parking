@@ -8,6 +8,8 @@ const { confirmScan } = require('./gatePass');
 // Neon free tu "ngu" sau 5 phut khong truy van -> chi cap nhat last_seen 30 phut/lan
 // (trang thai online/offline that da co topic 'online' + LWT lo).
 const LAST_SEEN_WRITE_MS = 30 * 60 * 1000;
+// O "giu cho mo coi" (thiet bi giu nhung DB khong co dat cho) -> gui lenh huy toi da 1 lan / 30s moi o
+const ORPHAN_RETRY_MS = 30 * 1000;
 
 // Chuyen trang thai 1 o + mo/dong luot do. Tra ve false neu khong co thay doi.
 async function applySlotState(q, lotId, slotNumber, newState, distance) {
@@ -55,12 +57,42 @@ async function applySlotState(q, lotId, slotNumber, newState, distance) {
 }
 
 function createSync(db) {
-  const cache = new Map(); // lotId -> { slots: {n: state}, gates, fw, lastSeenWrite }
+  const cache = new Map(); // lotId -> { slots: {n: state}, gates, fw, lastSeenWrite, orphanTry: {n: ms} }
+  let device = null; // gan sau (cau MQTT can sync truoc khi tao) -> attachDevice
+
+  // Thiet bi dang giu o nhung khong con dat cho 'pending'/'active' nao (vd lenh 'reserve' den tre sau khi API
+  // da bao device_timeout -> dat cho 'failed') -> gui lenh huy de nha o, va tra o ve 'free' trong DB.
+  async function releaseOrphan(lotId, slotNumber) {
+    const c = cache.get(lotId);
+    if (!device || !c) return;
+    const last = c.orphanTry[slotNumber] || 0;
+    if (Date.now() - last < ORPHAN_RETRY_MS) return;
+    const live = await db.one(
+      `SELECT 1 FROM reservations r JOIN slots s ON s.id = r.slot_id
+       WHERE s.lot_id = $1 AND s.slot_number = $2 AND r.status IN ('pending', 'active') LIMIT 1`, [lotId, slotNumber]);
+    if (live) return;
+    c.orphanTry[slotNumber] = Date.now();
+    console.log(`[SYNC] ${lotId} o ${slotNumber}: thiet bi giu cho khong co dat cho -> huy`);
+    const ack = await device.sendCommand(lotId, { action: 'cancel_reservation', slot: slotNumber });
+    if (ack && (ack.ok || ack.error === 'not_reserved')) {
+      await db.query(
+        `UPDATE slots s SET state = 'free', updated_at = now()
+         WHERE s.lot_id = $1 AND s.slot_number = $2 AND s.state = 'reserved'
+           AND NOT EXISTS (SELECT 1 FROM reservations r WHERE r.slot_id = s.id AND r.status IN ('pending', 'active'))`,
+        [lotId, slotNumber]);
+      delete c.orphanTry[slotNumber];
+    } else {
+      delete c.slots[slotNumber]; // chua huy duoc (mat ket noi) -> ban tin status ke tiep thu lai
+    }
+  }
+  const releaseLater = (lotId, slotNumber) => {
+    releaseOrphan(lotId, slotNumber).catch((e) => console.error('[SYNC] Loi nha o:', e.message));
+  };
 
   async function lotExists(lotId) {
     if (cache.has(lotId)) return true;
     const lot = await db.one('SELECT id FROM parking_lots WHERE id = $1', [lotId]);
-    if (lot) cache.set(lotId, { slots: {}, gates: {}, fw: null, lastSeenWrite: 0 });
+    if (lot) cache.set(lotId, { slots: {}, gates: {}, fw: null, lastSeenWrite: 0, orphanTry: {} });
     return !!lot;
   }
 
@@ -79,6 +111,7 @@ function createSync(db) {
       if (c.slots[s.id] === s.state) continue;
       await db.tx((q) => applySlotState(q, lotId, s.id, s.state, s.distance));
       c.slots[s.id] = s.state;
+      if (s.state === 'reserved') releaseLater(lotId, s.id);
     }
 
     const gates = st.gates || {};
@@ -123,10 +156,14 @@ function createSync(db) {
     } else if (ev.type === 'ack' && ev.action === 'open_gate' && ev.ok && ev.requestId) {
       // Ack mo barie cho 1 lan quet QR (ca khi den tre, sau khi API da bao device_timeout) -> xac nhan xe vao/ra
       await confirmScan(db, ev.requestId);
+    } else if (ev.type === 'ack' && ev.action === 'reserve' && ev.ok && ev.requestId) {
+      // Ack giu cho den tre: API da bao that bai cho nguoi dung -> khong de thiet bi giu o
+      const r = await db.one('SELECT status FROM reservations WHERE request_id = $1', [ev.requestId]);
+      if (r && !['pending', 'active'].includes(r.status) && ev.slot) releaseLater(lotId, ev.slot);
     }
   }
 
-  return { handleOnline, handleStatus, handleEvent };
+  return { handleOnline, handleStatus, handleEvent, attachDevice: (d) => { device = d; } };
 }
 
 module.exports = { createSync, applySlotState };

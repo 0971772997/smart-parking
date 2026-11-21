@@ -339,6 +339,26 @@ describe('Dat cho', () => {
     assert.equal(r.body.details.status, 'failed');
     device.state.mode = 'ok';
   });
+  test('Lenh giu cho den thiet bi tre (sau khi da bao failed) -> server huy, o tro ve free', async () => {
+    const cmd = device.state.log.filter((c) => c.action === 'reserve').at(-1);
+    assert.equal(cmd.slot, 4);
+    // ESP32 nhan lenh tre: tu giu o 4, gui ack + status
+    device.state.slots[3].reserved = true;
+    sync.attachDevice(device);
+    await sync.handleEvent(LOT, { type: 'ack', action: 'reserve', requestId: cmd.requestId, ok: true, slot: 4 });
+    await sync.handleStatus(LOT, { slots: [{ id: 4, state: 'reserved' }] });
+    let state;
+    for (let i = 0; i < 40; i++) {
+      state = (await api().get(`/api/lots/${LOT}`).expect(200)).body.slots[3].state;
+      if (state === 'free' && !device.state.slots[3].reserved) break;
+      await new Promise((ok) => setTimeout(ok, 50));
+    }
+    assert.equal(state, 'free');
+    assert.equal(device.state.slots[3].reserved, false);
+    assert.equal(device.state.log.at(-1).action, 'cancel_reservation');
+    await sync.handleStatus(LOT, { slots: [{ id: 4, state: 'free' }] });
+    sync.attachDevice(null);
+  });
   test('Thiet bi offline -> 503', async () => {
     await db.query('UPDATE parking_lots SET online = false WHERE id = $1', [LOT]);
     const r = await api().post(`/api/lots/${LOT}/reservations`).set(auth(user2Token)).send({ slotNumber: 4 }).expect(503);

@@ -25,6 +25,7 @@ async function main() {
 
   const sync = createSync(db);
   const device = createMqttBridge(config.mqtt, sync, { timeoutMs: config.deviceTimeoutMs });
+  sync.attachDevice(device);
   const app = createApp({ db, auth: createAuth(config), device, otpDevMode: config.otpDevMode,
     social: createSocialVerifier(config.social), gatePass: createGatePass(config.jwtSecret) });
 
