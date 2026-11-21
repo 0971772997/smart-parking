@@ -3,7 +3,7 @@
 // - So do o cap nhat moi 10 giay; o dang chon bi nguoi khac lay -> bo chon + bao
 // - Quy tac lay tu may chu (GET /reservations/rules); dang co ve / bi khoa -> chan dat, chi dan
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -195,7 +195,8 @@ export default function BookingScreen({ navigation, route }) {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <StatusBar style="dark" />
-      <Header navigation={navigation} />
+      <View style={styles.webContainer}>
+        <Header navigation={navigation} />
 
       <ScrollView
         contentContainerStyle={styles.content}
@@ -343,17 +344,18 @@ export default function BookingScreen({ navigation, route }) {
         <Button title="Đặt chỗ" onPress={() => setConfirming(true)} disabled={!!blocker} loading={busy} />
       </ScrollView>
 
-      <ConfirmDialog
-        visible={confirming}
-        title="Xác nhận đặt chỗ"
-        message={`${lot?.name || ''}\nKhu ${zone} • Ô #${targetSlot}${slotNumber == null ? ' (tự chọn)' : ''}\n`
-          + `Giữ chỗ ${hold} phút • Gửi dự kiến ${formatDuration(duration)} • ~${formatVND(fee)}`}
-        confirmLabel="Đặt ngay"
-        cancelLabel="Xem lại"
-        loading={busy}
-        onConfirm={submit}
-        onCancel={() => setConfirming(false)}
-      />
+        <ConfirmDialog
+          visible={confirming}
+          title="Xác nhận đặt chỗ"
+          message={`${lot?.name || ''}\nKhu ${zone} • Ô #${targetSlot}${slotNumber == null ? ' (tự chọn)' : ''}\n`
+            + `Giữ chỗ ${hold} phút • Gửi dự kiến ${formatDuration(duration)} • ~${formatVND(fee)}`}
+          confirmLabel="Đặt ngay"
+          cancelLabel="Xem lại"
+          loading={busy}
+          onConfirm={submit}
+          onCancel={() => setConfirming(false)}
+        />
+      </View>
     </SafeAreaView>
   );
 }
@@ -449,7 +451,20 @@ export function RulesBox({ rules }) {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#FFFFFF' },
+  safe: { flex: 1, backgroundColor: '#F1F5F9' },
+  webContainer: {
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    ...(Platform.OS === 'web'
+      ? {
+          boxShadow: '0 4px 24px rgba(0,0,0,0.06)',
+          minHeight: '100vh',
+        }
+      : {}),
+  },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   muted: { fontSize: 13, color: colors.textMuted, marginTop: 8 },
   content: { padding: 16, paddingBottom: 40, backgroundColor: '#F8FAFC', flexGrow: 1 },
