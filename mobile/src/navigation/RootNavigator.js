@@ -6,6 +6,9 @@ import RegisterScreen from '../screens/auth/RegisterScreen';
 import HomeScreen from '../screens/home/HomeScreen';
 import SchedulesScreen from '../screens/schedules/SchedulesScreen';
 import ScheduleFormScreen from '../screens/schedules/ScheduleFormScreen';
+import SetupParkingLotScreen from '../screens/parking/SetupParkingLotScreen';
+import BookingScreen from '../screens/booking/BookingScreen';
+import ReservationDetailScreen from '../screens/booking/ReservationDetailScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -19,6 +22,9 @@ export default function RootNavigator() {
       <Stack.Screen name="Home" component={HomeScreen} options={{ animation: 'fade', title: 'SmartPark' }} />
       <Stack.Screen name="Schedules" component={SchedulesScreen} options={{ title: 'Lịch gửi xe' }} />
       <Stack.Screen name="ScheduleForm" component={ScheduleFormScreen} options={{ title: 'Lịch gửi xe', animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="SetupParkingLot" component={SetupParkingLotScreen} options={{ title: 'Bản đồ & Thiết lập Bãi đỗ (UI-007)' }} />
+      <Stack.Screen name="Booking" component={BookingScreen} options={{ title: 'Đặt chỗ' }} />
+      <Stack.Screen name="ReservationDetail" component={ReservationDetailScreen} options={{ title: 'Chi tiết đặt chỗ' }} />
     </Stack.Navigator>
   );
 }

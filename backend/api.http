@@ -87,3 +87,26 @@ Authorization: Bearer {{adminToken}}
 ### Nhat ky su kien
 GET {{base}}/lots/sp-demo-01/events?limit=20
 Authorization: Bearer {{adminToken}}
+
+### ===== THANH TOAN / GIAO DICH =====
+### Luot do cua toi (parking / unpaid / paid)
+GET {{base}}/sessions/mine
+Authorization: Bearer {{token}}
+
+### Thanh toan luot do da ket thuc (doi 1 thanh id lay tu /sessions/mine)
+POST {{base}}/sessions/1/pay
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "method": "momo" }
+
+### Lich su giao dich cua toi
+GET {{base}}/payments
+Authorization: Bearer {{token}}
+
+### Admin: thu tien mat tai cong (khach vang lai)
+POST {{base}}/lots/sp-demo-01/sessions/1/pay
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "method": "cash" }

@@ -52,13 +52,25 @@ module.exports = function authRoutes({ db, auth, otpDevMode = true, social }) {
     }
   }));
 
-  // Dang nhap bang ID (email) + mat khau
+  // Dang nhap bang Email HOAC So dien thoai HOAC Ten dang nhap + mat khau
   r.post('/login', wrap(async (req, res) => {
-    const email = v.email(req.body);
+    const rawId = req.body?.identifier || req.body?.email || req.body?.phone;
+    if (!rawId || typeof rawId !== 'string') {
+      throw badRequest('validation_error', 'Vui long nhap email hoac so dien thoai');
+    }
     const password = v.str(req.body, 'password', { max: 72 });
-    const u = await db.one('SELECT * FROM users WHERE email = $1', [email]);
+    const cleanId = rawId.trim().toLowerCase();
+    const ph = normalizePhone(rawId);
+
+    const u = await db.one(
+      `SELECT * FROM users 
+       WHERE lower(email) = $1 
+          OR ($2::varchar IS NOT NULL AND phone = $2)
+          OR lower(username) = $1`,
+      [cleanId, ph || null]
+    );
     if (!u || !(await bcrypt.compare(password, u.password_hash))) {
-      throw new HttpError(401, 'invalid_credentials', 'Sai email hoac mat khau');
+      throw new HttpError(401, 'invalid_credentials', 'Email/SDT hoac mat khau khong dung');
     }
     res.json({ token: auth.sign(u), user: map.user(u) });
   }));

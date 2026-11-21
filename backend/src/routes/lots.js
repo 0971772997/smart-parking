@@ -3,6 +3,20 @@ const crypto = require('crypto');
 const { wrap, badRequest, notFound, conflict, HttpError } = require('../errors');
 const v = require('../validate');
 const map = require('../mappers');
+const { RULES, RESERVATION_SELECT, newCode, estimateFee, expireStale, suspension, zoneSql } = require('../booking');
+
+// Tom tat theo khu vuc: [{ zone, total, free, occupied, reserved }]
+function zonesOf(slots) {
+  const by = new Map();
+  for (const s of slots) {
+    const z = s.zone || 'A';
+    if (!by.has(z)) by.set(z, { zone: z, total: 0, free: 0, occupied: 0, reserved: 0 });
+    const e = by.get(z);
+    e.total += 1;
+    e[s.state] += 1;
+  }
+  return [...by.values()].sort((a, b) => a.zone.localeCompare(b.zone));
+}
 
 const LOT_ID_RE = /^[a-zA-Z0-9_-]{3,50}$/;
 
@@ -21,6 +35,7 @@ module.exports = function lotRoutes({ db, auth, device }) {
 
   // ---------- Cong khai ----------
   r.get('/', wrap(async (_req, res) => {
+    await expireStale(db);
     const { rows } = await db.query(`
       SELECT l.*, COUNT(s.id) FILTER (WHERE s.state = 'free') AS free_slots
       FROM parking_lots l LEFT JOIN slots s ON s.lot_id = l.id
@@ -29,6 +44,7 @@ module.exports = function lotRoutes({ db, auth, device }) {
   }));
 
   r.get('/:lotId', wrap(async (req, res) => {
+    await expireStale(db);
     const lot = await getLot(req.params.lotId);
     const { rows } = await db.query('SELECT * FROM slots WHERE lot_id = $1 ORDER BY slot_number', [lot.id]);
     const slots = rows.map(map.slot);
@@ -37,6 +53,7 @@ module.exports = function lotRoutes({ db, auth, device }) {
       freeSlots: slots.filter((s) => s.state === 'free').length,
       occupiedSlots: slots.filter((s) => s.state === 'occupied').length,
       reservedSlots: slots.filter((s) => s.state === 'reserved').length,
+      zones: zonesOf(slots),
       slots,
     });
   }));
@@ -48,43 +65,70 @@ module.exports = function lotRoutes({ db, auth, device }) {
   }));
 
   // ---------- Dat cho (nguoi dung da dang nhap) ----------
+  // Body: { zone?, slotNumber?, minutes? (giu cho), durationMinutes? (gui du kien), vehicleId? }
+  // - Co slotNumber: dat dung o do. Chi co zone: tu chon o trong so nho nhat trong khu. Khong co ca 2: o trong bat ky.
+  // Quy tac: xem src/booking.js (RULES). Tra ve 201 khi ESP32 xac nhan giu o (status 'active').
   r.post('/:lotId/reservations', auth.requireAuth, wrap(async (req, res) => {
     const lot = await getLot(req.params.lotId);
-    const slotNumber = v.int(req.body, 'slotNumber', { min: 1, max: lot.total_slots });
-    const minutes = v.int(req.body, 'minutes', { min: 1, max: 120, def: 15 });
+    const slotNumber = v.int(req.body, 'slotNumber', { min: 1, max: lot.total_slots, optional: true });
+    const zone = v.str(req.body, 'zone', { max: 10, optional: true });
+    const { hold, duration } = RULES;
+    const minutes = v.int(req.body, 'minutes', { min: hold.min, max: hold.max, def: hold.default });
+    const durationMinutes = v.int(req.body, 'durationMinutes', { min: duration.min, max: duration.max, def: duration.default });
     const vehicleId = v.int(req.body, 'vehicleId', { min: 1, optional: true });
 
     if (vehicleId) {
       const veh = await db.one('SELECT id FROM vehicles WHERE id = $1 AND user_id = $2', [vehicleId, req.user.id]);
       if (!veh) throw badRequest('vehicle_not_found', 'Xe khong thuoc tai khoan nay');
     }
+    await expireStale(db);
     const mine = await db.one(
       `SELECT id FROM reservations WHERE user_id = $1 AND status IN ('pending', 'active')`, [req.user.id]);
     if (mine) throw conflict('already_has_reservation', 'Ban dang co 1 dat cho chua dung');
+    const sus = await suspension(db, req.user.id);
+    if (sus.until) {
+      throw Object.assign(new HttpError(403, 'booking_suspended', 'Tam khoa dat cho do khong den nhieu lan'),
+        { details: { suspendedUntil: sus.until, noShows: sus.noShows } });
+    }
 
-    const slot = await db.one('SELECT * FROM slots WHERE lot_id = $1 AND slot_number = $2', [lot.id, slotNumber]);
-    if (!slot) throw notFound('slot_not_found', 'Khong tim thay o do');
-    if (slot.state !== 'free') throw conflict('slot_not_free', 'O do khong con trong');
+    let slot;
+    if (slotNumber) {
+      slot = await db.one('SELECT * FROM slots WHERE lot_id = $1 AND slot_number = $2', [lot.id, slotNumber]);
+      if (!slot) throw notFound('slot_not_found', 'Khong tim thay o do');
+      if (zone && slot.zone !== zone) throw badRequest('slot_zone_mismatch', `O ${slotNumber} khong thuoc khu ${zone}`);
+      if (slot.state !== 'free') throw conflict('slot_not_free', 'O do khong con trong');
+    } else {
+      if (zone && !(await db.one('SELECT 1 FROM slots WHERE lot_id = $1 AND zone = $2 LIMIT 1', [lot.id, zone]))) {
+        throw notFound('zone_not_found', 'Khong tim thay khu vuc');
+      }
+      slot = await db.one(
+        `SELECT * FROM slots WHERE lot_id = $1 AND state = 'free' AND ($2::text IS NULL OR zone = $2)
+         ORDER BY slot_number LIMIT 1`, [lot.id, zone]);
+      if (!slot) throw conflict(zone ? 'zone_full' : 'lot_full', zone ? 'Khu vuc da het o trong' : 'Bai da het o trong');
+    }
     requireOnline(lot);
 
     const requestId = crypto.randomUUID();
     let resv;
     try {
       resv = await db.one(
-        `INSERT INTO reservations (user_id, slot_id, vehicle_id, minutes, request_id)
-         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [req.user.id, slot.id, vehicleId, minutes, requestId],
+        `INSERT INTO reservations (user_id, slot_id, vehicle_id, minutes, request_id, code, duration_minutes, estimated_fee)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [req.user.id, slot.id, vehicleId, minutes, requestId, newCode(), durationMinutes,
+          estimateFee(lot.price_per_hour, durationMinutes)],
       );
     } catch (e) {
       if (e.code === '23505') throw conflict('slot_not_free', 'O do vua duoc nguoi khac dat');
       throw e;
     }
 
-    const ack = await device.sendCommand(lot.id, { action: 'reserve', slot: slotNumber, minutes, requestId });
+    // Xac nhan: chi khi ESP32 tra ack ok moi coi la giu cho thanh cong; gio het han tinh tu luc xac nhan
+    const ack = await device.sendCommand(lot.id, { action: 'reserve', slot: slot.slot_number, minutes, requestId });
     let row;
     if (ack && ack.ok) {
       row = await db.one(
-        `UPDATE reservations SET status = 'active', expires_at = now() + make_interval(mins => minutes), updated_at = now()
+        `UPDATE reservations SET status = 'active', confirmed_at = now(),
+           expires_at = now() + make_interval(mins => minutes), updated_at = now()
          WHERE id = $1 RETURNING *`, [resv.id]);
       await db.query(`UPDATE slots SET state = 'reserved', updated_at = now() WHERE id = $1 AND state = 'free'`, [slot.id]);
     } else {
@@ -93,7 +137,7 @@ module.exports = function lotRoutes({ db, auth, device }) {
         `UPDATE reservations SET status = 'failed', error = $2, updated_at = now() WHERE id = $1 RETURNING *`,
         [resv.id, err]);
     }
-    const out = map.reservation({ ...row, lot_id: lot.id, slot_number: slotNumber });
+    const out = map.reservation(await db.one(`${RESERVATION_SELECT} WHERE r.id = $1`, [row.id]));
     if (row.status === 'active') return res.status(201).json(out);
     if (!ack) throw Object.assign(new HttpError(504, 'device_timeout', 'Thiet bi khong phan hoi'), { details: out });
     throw Object.assign(conflict(row.error, 'Thiet bi tu choi dat cho'), { details: out });
@@ -111,7 +155,8 @@ module.exports = function lotRoutes({ db, auth, device }) {
         `INSERT INTO parking_lots (id, name, address, total_slots, price_per_hour) VALUES ($1,$2,$3,$4,$5)
          ON CONFLICT (id) DO NOTHING RETURNING *`, [id, name, address, totalSlots, pricePerHour])).rows[0];
       if (!l) throw conflict('lot_exists', 'Ma bai do da ton tai');
-      await q.query(`INSERT INTO slots (lot_id, slot_number) SELECT $1, n FROM generate_series(1, $2) n`, [id, totalSlots]);
+      await q.query(`INSERT INTO slots (lot_id, slot_number, zone)
+                     SELECT $1, n, ${zoneSql('n', '$2::int')} FROM generate_series(1, $2) n`, [id, totalSlots]);
       return l;
     });
     res.status(201).json(map.lot(lot));

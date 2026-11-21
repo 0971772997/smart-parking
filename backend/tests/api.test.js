@@ -440,3 +440,185 @@ describe('Quan tri', () => {
     await api().get(`/api/lots/${LOT}/stats?date=19-11-2026`).set(auth(adminToken)).expect(400);
   });
 });
+
+describe('Thanh toan / giao dich', () => {
+  let sessionId, paymentId;
+  before(async () => {
+    // Bai online, cac o trong (DB + thiet bi gia lap) de bat dau luong moi
+    await db.query(`UPDATE parking_lots SET online = true WHERE id = $1`, [LOT]);
+    device.state.slots.forEach((s) => { s.reserved = false; s.occupied = false; });
+    await sync.handleStatus(LOT, { slots: [1, 2, 3, 4].map((id) => ({ id, state: 'free', distance: 400 })) });
+  });
+
+  test('Dat cho -> xe vao -> /sessions/mine: dang do, co phi tam tinh; chua thanh toan duoc', async () => {
+    await api().post(`/api/lots/${LOT}/reservations`).set(auth(userToken)).send({ slotNumber: 2 }).expect(201);
+    await sync.handleEvent(LOT, { type: 'slot_changed', slot: 2, state: 'occupied' });
+    const mine = await api().get('/api/sessions/mine').set(auth(userToken)).expect(200);
+    const s = mine.body[0];
+    sessionId = s.id;
+    assert.equal(s.status, 'parking');
+    assert.equal(s.slotNumber, 2);
+    assert.equal(s.estimatedFee, 10000);
+    const r = await api().post(`/api/sessions/${sessionId}/pay`).set(auth(userToken)).send({ method: 'momo' }).expect(409);
+    assert.equal(r.body.error, 'session_not_ended');
+  });
+
+  test('Xe ra -> cho thanh toan; nguoi khac / method sai bi chan; thanh toan thanh cong 1 lan', async () => {
+    await sync.handleEvent(LOT, { type: 'slot_changed', slot: 2, state: 'free' });
+    let mine = await api().get('/api/sessions/mine').set(auth(userToken)).expect(200);
+    assert.equal(mine.body[0].status, 'unpaid');
+    assert.equal(mine.body[0].fee, 10000);
+
+    await api().post(`/api/sessions/${sessionId}/pay`).set(auth(user2Token)).send({ method: 'momo' }).expect(404);
+    await api().post(`/api/sessions/${sessionId}/pay`).set(auth(userToken)).send({ method: 'bitcoin' }).expect(400);
+    await api().post(`/api/sessions/${sessionId}/pay`).set(auth(userToken)).send({ method: 'cash' }).expect(400);
+
+    const p = await api().post(`/api/sessions/${sessionId}/pay`).set(auth(userToken)).send({ method: 'momo' }).expect(201);
+    paymentId = p.body.id;
+    assert.match(p.body.code, /^GD\d{8}-[A-Z0-9]{6}$/);
+    assert.equal(p.body.amount, 10000);
+    assert.equal(p.body.slotNumber, 2);
+
+    const again = await api().post(`/api/sessions/${sessionId}/pay`).set(auth(userToken)).send({ method: 'card' }).expect(409);
+    assert.equal(again.body.error, 'already_paid');
+    mine = await api().get('/api/sessions/mine').set(auth(userToken)).expect(200);
+    assert.equal(mine.body[0].status, 'paid');
+    assert.equal(mine.body[0].payment.code, p.body.code);
+  });
+
+  test('Lich su giao dich: chu so huu xem duoc, nguoi khac khong', async () => {
+    const list = await api().get('/api/payments').set(auth(userToken)).expect(200);
+    assert.equal(list.body[0].id, paymentId);
+    await api().get(`/api/payments/${paymentId}`).set(auth(userToken)).expect(200);
+    await api().get(`/api/payments/${paymentId}`).set(auth(user2Token)).expect(404);
+    const l2 = await api().get('/api/payments').set(auth(user2Token)).expect(200);
+    assert.equal(l2.body.length, 0);
+    await api().get('/api/payments').expect(401);
+  });
+
+  test('Admin thu tien mat tai cong cho khach vang lai; user thuong bi chan', async () => {
+    // Khach vang lai (khong dat cho) do o 4
+    await sync.handleEvent(LOT, { type: 'slot_changed', slot: 4, state: 'occupied' });
+    await sync.handleEvent(LOT, { type: 'slot_changed', slot: 4, state: 'free' });
+    const sessions = await api().get(`/api/lots/${LOT}/sessions`).set(auth(adminToken)).expect(200);
+    const walkInId = sessions.body.find((x) => x.slotNumber === 4 && x.endedAt && !x.reservationId).id;
+    await api().post(`/api/lots/${LOT}/sessions/${walkInId}/pay`).set(auth(userToken)).send({}).expect(403);
+    const cash = await api().post(`/api/lots/${LOT}/sessions/${walkInId}/pay`).set(auth(adminToken)).send({}).expect(201);
+    assert.equal(cash.body.method, 'cash');
+    assert.equal(cash.body.userId, null);
+    assert.equal(cash.body.amount, 10000);
+    await api().post(`/api/lots/${LOT}/sessions/${walkInId}/pay`).set(auth(adminToken)).send({}).expect(409);
+  });
+});
+
+describe('Dat cho: khu vuc, thoi luong, quy tac giu cho / het han / xac nhan', () => {
+  let resvId;
+  const slotId = async (n) => (await db.one('SELECT id FROM slots WHERE lot_id = $1 AND slot_number = $2', [LOT, n])).id;
+  before(async () => {
+    await db.query(`UPDATE parking_lots SET online = true WHERE id = $1`, [LOT]);
+    device.state.slots.forEach((s) => { s.reserved = false; s.occupied = false; });
+    device.state.mode = 'ok';
+    await sync.handleStatus(LOT, { slots: [1, 2, 3, 4].map((id) => ({ id, state: 'free', distance: 400 })) });
+  });
+
+  test('Bai co khu vuc A (o 1-2) / B (o 3-4) kem so o trong tung khu', async () => {
+    const lot = await api().get(`/api/lots/${LOT}`).expect(200);
+    assert.deepEqual(lot.body.slots.map((s) => s.zone), ['A', 'A', 'B', 'B']);
+    assert.deepEqual(lot.body.zones.map((z) => [z.zone, z.total, z.free]), [['A', 2, 2], ['B', 2, 2]]);
+  });
+
+  test('Quy tac dat cho cong khai cho app', async () => {
+    const r = await api().get('/api/reservations/rules').set(auth(userToken)).expect(200);
+    assert.equal(r.body.hold.default, 15);
+    assert.equal(r.body.extend.maxTimes, 2);
+    assert.equal(r.body.noShow.limit, 3);
+    assert.equal(typeof r.body.me.noShows, 'number');
+  });
+
+  test('Validate: o khong thuoc khu, khu khong ton tai, thoi gian giu / thoi luong sai', async () => {
+    const post = (body) => api().post(`/api/lots/${LOT}/reservations`).set(auth(userToken)).send(body);
+    assert.equal((await post({ zone: 'A', slotNumber: 3 }).expect(400)).body.error, 'slot_zone_mismatch');
+    assert.equal((await post({ zone: 'Z' }).expect(404)).body.error, 'zone_not_found');
+    await post({ zone: 'A', minutes: 3 }).expect(400);
+    await post({ zone: 'A', durationMinutes: 10 }).expect(400);
+    await post({ zone: 'A', durationMinutes: 2000 }).expect(400);
+  });
+
+  test('Chi chon khu -> tu chon o trong; co ma xac nhan, phi du kien, thoi diem xac nhan', async () => {
+    const r = await api().post(`/api/lots/${LOT}/reservations`).set(auth(userToken))
+      .send({ zone: 'B', minutes: 30, durationMinutes: 150, vehicleId }).expect(201);
+    resvId = r.body.id;
+    assert.equal(r.body.status, 'active');
+    assert.equal(r.body.zone, 'B');
+    assert.equal(r.body.slotNumber, 3);
+    assert.match(r.body.code, /^DC-[A-Z2-9]{6}$/);
+    assert.equal(r.body.holdMinutes, 30);
+    assert.equal(r.body.durationMinutes, 150);
+    assert.equal(r.body.estimatedFee, 30000); // 150 phut -> 3 gio x 10.000
+    assert.ok(r.body.confirmedAt);
+    assert.ok(r.body.vehiclePlate);
+    assert.equal(r.body.lotName, 'Bãi đỗ xe thông minh');
+    assert.equal(r.body.canCancel, true);
+    assert.equal(r.body.canExtend, true);
+    const ms = new Date(r.body.expiresAt) - new Date(r.body.confirmedAt);
+    assert.ok(Math.abs(ms - 30 * 60000) < 2000);
+  });
+
+  test('Gia han toi da 2 lan, moi lan <= 30 phut', async () => {
+    const ext = (minutes) => api().post(`/api/reservations/${resvId}/extend`).set(auth(userToken)).send({ minutes });
+    await ext(45).expect(400);
+    assert.equal((await ext(10).expect(200)).body.extendCount, 1);
+    const second = await ext(15).expect(200);
+    assert.equal(second.body.minutes, 55);
+    assert.equal(second.body.canExtend, false);
+    assert.equal((await ext(10).expect(409)).body.error, 'extend_limit');
+  });
+
+  test('Loc danh sach theo nhieu trang thai', async () => {
+    const r = await api().get('/api/reservations?status=active,pending').set(auth(userToken)).expect(200);
+    assert.deepEqual(r.body.map((x) => x.id), [resvId]);
+  });
+
+  test('Qua gio giu cho (+ 60s du phong) -> server tu danh dau het han, o tro ve free', async () => {
+    await db.query(`UPDATE reservations SET expires_at = now() - interval '2 minutes' WHERE id = $1`, [resvId]);
+    const r = await api().get(`/api/reservations/${resvId}`).set(auth(userToken)).expect(200);
+    assert.equal(r.body.status, 'expired');
+    assert.equal(r.body.canCancel, false);
+    const lot = await api().get(`/api/lots/${LOT}`).expect(200);
+    assert.equal(lot.body.slots[2].state, 'free');
+    device.state.slots[2].reserved = false; // thiet bi that tu het han theo dong ho rieng
+  });
+
+  test('Khu het o trong -> 409 zone_full', async () => {
+    await db.query(`UPDATE slots SET state = 'occupied' WHERE lot_id = $1 AND zone = 'B'`, [LOT]);
+    const r = await api().post(`/api/lots/${LOT}/reservations`).set(auth(userToken)).send({ zone: 'B' }).expect(409);
+    assert.equal(r.body.error, 'zone_full');
+    await db.query(`UPDATE slots SET state = 'free' WHERE lot_id = $1 AND zone = 'B'`, [LOT]);
+  });
+
+  test("'pending' bi treo qua 60s -> failed", async () => {
+    const me = await api().get('/api/auth/me').set(auth(user2Token)).expect(200);
+    const uid = (me.body.user || me.body).id;
+    await db.query(
+      `INSERT INTO reservations (user_id, slot_id, minutes, request_id, created_at)
+       VALUES ($1, $2, 15, 'treo-1', now() - interval '5 minutes')`, [uid, await slotId(1)]);
+    const r = await api().get('/api/reservations').set(auth(user2Token)).expect(200);
+    const stuck = r.body.find((x) => x.status === 'failed' && x.error === 'pending_timeout');
+    assert.ok(stuck);
+  });
+
+  test('Khong den 3 lan trong 7 ngay -> tam khoa dat cho 24 gio', async () => {
+    const me = await api().get('/api/auth/me').set(auth(user2Token)).expect(200);
+    const uid = (me.body.user || me.body).id;
+    await db.query(
+      `INSERT INTO reservations (user_id, slot_id, minutes, request_id, status, updated_at)
+       SELECT $1, $2, 15, 'noshow-' || n, 'expired', now() - make_interval(hours => n)
+       FROM generate_series(1, 3) n`, [uid, await slotId(1)]);
+    const r = await api().post(`/api/lots/${LOT}/reservations`).set(auth(user2Token)).send({ zone: 'A' }).expect(403);
+    assert.equal(r.body.error, 'booking_suspended');
+    assert.ok(new Date(r.body.details.suspendedUntil) > new Date());
+    const rules = await api().get('/api/reservations/rules').set(auth(user2Token)).expect(200);
+    assert.equal(rules.body.me.noShows, 3);
+    assert.ok(rules.body.me.suspendedUntil);
+  });
+});

@@ -10,3 +10,7 @@ ON CONFLICT (id) DO UPDATE SET
 INSERT INTO slots (lot_id, slot_number)
 SELECT 'sp-demo-01', n FROM generate_series(1, 4) AS n
 ON CONFLICT (lot_id, slot_number) DO NOTHING;
+
+-- Gan khu vuc cho o chua co (chia 2 day A / B theo so o; bai 4 o: A = 1-2, B = 3-4)
+UPDATE slots s SET zone = chr(65 + ((s.slot_number - 1) / GREATEST(1, ceil(l.total_slots / 2.0)::int)))
+FROM parking_lots l WHERE l.id = s.lot_id AND s.zone IS NULL;

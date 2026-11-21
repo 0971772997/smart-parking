@@ -1,0 +1,74 @@
+// QUY TAC DAT CHO (giu cho / het han / xac nhan) - dung chung cho route va app (GET /api/reservations/rules)
+//
+// Vong doi 1 dat cho:
+//   pending  --(ESP32 ack ok)-->  active (= DA XAC NHAN, o duoc giu, LED vang)
+//   pending  --(ESP32 tu choi / khong phan hoi)-->  failed
+//   active   --(xe vao dung o)-->  fulfilled  (mo luot do, tinh phi tu luc xe vao)
+//   active   --(nguoi dung huy)-->  cancelled  (mien phi, khong tinh vi pham)
+//   active   --(het gio giu cho ma xe chua den)-->  expired  (= "khong den", tinh 1 lan vi pham)
+const crypto = require('crypto');
+
+const RULES = {
+  maxActivePerUser: 1,                                         // moi tai khoan chi 1 dat cho dang hieu luc
+  hold: { min: 5, max: 120, default: 15, options: [15, 30, 45, 60] },          // phut giu cho cho xe den
+  duration: { min: 30, max: 1440, default: 120, options: [60, 120, 180, 240, 480] }, // thoi luong gui du kien (phut)
+  extend: { maxTimes: 2, min: 5, max: 30, options: [10, 15, 30] },             // gia han: toi da 2 lan, moi lan <= 30 phut
+  graceSeconds: 60,          // qua gio giu cho them 60s (cho do tre MQTT) server moi tu danh dau het han
+  pendingTimeoutSeconds: 60, // 'pending' qua 60s (server loi giua chung) -> failed
+  noShow: { limit: 3, windowDays: 7, suspendHours: 24 },   // 3 lan khong den trong 7 ngay -> khoa dat cho 24 gio
+};
+
+// Ma dat cho de doi chieu tai cong, vd DC-7KQ2XA (bo 0/O/1/I de de doc)
+const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function newCode() {
+  const bytes = crypto.randomBytes(6);
+  return 'DC-' + Array.from(bytes, (b) => CODE_CHARS[b % CODE_CHARS.length]).join('');
+}
+
+// Phi du kien = so gio (lam tron len, toi thieu 1) x gia/gio - giong cach tinh phi luot do that
+const estimateFee = (pricePerHour, durationMinutes) =>
+  Math.max(1, Math.ceil(durationMinutes / 60)) * pricePerHour;
+
+// Het han "luoi": goi truoc moi lan doc/dat cho thay vi chay dinh ky
+// (tranh danh thuc Neon moi 30s khi khong ai dung app). Thiet bi van tu het han theo dong ho rieng
+// va gui 'reservation_expired' - day chi la luoi an toan khi mat su kien / thiet bi offline.
+async function expireStale(db) {
+  const { rows } = await db.query(
+    `UPDATE reservations SET status = 'expired', error = COALESCE(error, 'no_show'), updated_at = now()
+     WHERE status = 'active' AND expires_at < now() - make_interval(secs => $1)
+     RETURNING slot_id`, [RULES.graceSeconds]);
+  if (rows.length) {
+    await db.query(`UPDATE slots SET state = 'free', updated_at = now() WHERE id = ANY($1) AND state = 'reserved'`,
+      [rows.map((r) => r.slot_id)]);
+  }
+  await db.query(
+    `UPDATE reservations SET status = 'failed', error = 'pending_timeout', updated_at = now()
+     WHERE status = 'pending' AND created_at < now() - make_interval(secs => $1)`, [RULES.pendingTimeoutSeconds]);
+}
+
+// Bi khoa dat cho do "khong den" qua nhieu? -> { until, noShows } hoac null
+async function suspension(db, userId) {
+  const { limit, windowDays, suspendHours } = RULES.noShow;
+  const { rows } = await db.query(
+    `SELECT updated_at FROM reservations
+     WHERE user_id = $1 AND status = 'expired' AND updated_at > now() - make_interval(days => $2)
+     ORDER BY updated_at DESC LIMIT $3`, [userId, windowDays, limit]);
+  if (rows.length < limit) return { noShows: rows.length, until: null };
+  const until = new Date(new Date(rows[0].updated_at).getTime() + suspendHours * 3600 * 1000);
+  return { noShows: rows.length, until: until > new Date() ? until : null };
+}
+
+// Khu vuc mac dinh khi tao o: chia bai thanh 2 day A / B (bai 4 o: A = 1-2, B = 3-4)
+const zoneSql = (slotNumberExpr, totalExpr) =>
+  `chr(65 + ((${slotNumberExpr} - 1) / GREATEST(1, ceil(${totalExpr} / 2.0)::int)))`;
+
+// Dat cho kem bai, khu vuc, o, bien so (dung cho danh sach / chi tiet / ket qua dat)
+const RESERVATION_SELECT = `
+  SELECT r.*, s.lot_id, s.slot_number, s.zone, l.online, l.name AS lot_name, l.address AS lot_address,
+         veh.plate_number AS vehicle_plate
+  FROM reservations r
+  JOIN slots s ON s.id = r.slot_id
+  JOIN parking_lots l ON l.id = s.lot_id
+  LEFT JOIN vehicles veh ON veh.id = r.vehicle_id`;
+
+module.exports = { RULES, RESERVATION_SELECT, newCode, estimateFee, expireStale, suspension, zoneSql };

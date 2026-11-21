@@ -1,11 +1,11 @@
+// Dat cho cua toi: xem danh sach / chi tiet, huy, gia han. Tao dat cho: POST /api/lots/:lotId/reservations
 const express = require('express');
 const { wrap, notFound, conflict, HttpError } = require('../errors');
 const v = require('../validate');
 const map = require('../mappers');
+const { RULES, RESERVATION_SELECT: SELECT, expireStale, suspension } = require('../booking');
 
-const SELECT = `
-  SELECT r.*, s.lot_id, s.slot_number, l.online
-  FROM reservations r JOIN slots s ON s.id = r.slot_id JOIN parking_lots l ON l.id = s.lot_id`;
+const STATUSES = ['pending', 'active', 'fulfilled', 'cancelled', 'expired', 'failed'];
 
 module.exports = function reservationRoutes({ db, auth, device }) {
   const r = express.Router();
@@ -13,6 +13,7 @@ module.exports = function reservationRoutes({ db, auth, device }) {
 
   async function getOwn(req) {
     const id = v.int(req.params, 'id', { min: 1 });
+    await expireStale(db);
     const row = await db.one(`${SELECT} WHERE r.id = $1`, [id]);
     if (!row || (row.user_id !== req.user.id && req.user.role !== 'admin')) {
       throw notFound('reservation_not_found', 'Khong tim thay dat cho');
@@ -25,11 +26,22 @@ module.exports = function reservationRoutes({ db, auth, device }) {
     if (!row.online) throw new HttpError(503, 'device_offline', 'Thiet bi bai do dang mat ket noi');
   }
 
-  // Danh sach dat cho cua toi. ?status=active
+  // Quy tac dat cho + tinh trang cua toi (so lan khong den, co bi khoa khong) -> app hien cho nguoi dung
+  r.get('/rules', wrap(async (req, res) => {
+    const s = await suspension(db, req.user.id);
+    res.json({ ...RULES, me: { noShows: s.noShows, suspendedUntil: s.until } });
+  }));
+
+  // Danh sach dat cho cua toi. ?status=active | ?status=active,pending
   r.get('/', wrap(async (req, res) => {
+    await expireStale(db);
     const params = [req.user.id];
     let where = 'r.user_id = $1';
-    if (req.query.status) { params.push(String(req.query.status)); where += ' AND r.status = $2'; }
+    if (req.query.status) {
+      const list = String(req.query.status).split(',').filter((x) => STATUSES.includes(x));
+      params.push(list);
+      where += ' AND r.status = ANY($2)';
+    }
     const { rows } = await db.query(`${SELECT} WHERE ${where} ORDER BY r.created_at DESC LIMIT 50`, params);
     res.json(rows.map(map.reservation));
   }));
@@ -38,7 +50,7 @@ module.exports = function reservationRoutes({ db, auth, device }) {
     res.json(map.reservation(await getOwn(req)));
   }));
 
-  // Huy dat cho
+  // Huy dat cho (mien phi, khong tinh vi pham)
   r.delete('/:id', wrap(async (req, res) => {
     const row = await getOwn(req);
     requireActive(row);
@@ -53,18 +65,20 @@ module.exports = function reservationRoutes({ db, auth, device }) {
     res.json(map.reservation({ ...row, ...(upd || {}), status: 'cancelled' }));
   }));
 
-  // Gia han dat cho
+  // Gia han giu cho: toi da RULES.extend.maxTimes lan, moi lan RULES.extend.min..max phut, chi khi chua het gio
   r.post('/:id/extend', wrap(async (req, res) => {
     const row = await getOwn(req);
-    const minutes = v.int(req.body, 'minutes', { min: 1, max: 120 });
-    if (row.minutes + minutes > 240) throw conflict('extend_limit', 'Tong thoi gian dat cho toi da 240 phut');
+    const { maxTimes, min, max } = RULES.extend;
+    const minutes = v.int(req.body, 'minutes', { min, max });
     requireActive(row);
+    if (new Date(row.expires_at) <= new Date()) throw conflict('reservation_expired', 'Dat cho da het gio giu');
+    if (row.extend_count >= maxTimes) throw conflict('extend_limit', `Chi duoc gia han toi da ${maxTimes} lan`);
     const ack = await device.sendCommand(row.lot_id, { action: 'extend_reservation', slot: row.slot_number, minutes });
     if (!ack) throw new HttpError(504, 'device_timeout', 'Thiet bi khong phan hoi');
     if (!ack.ok) throw conflict(ack.error || 'device_error', 'Thiet bi tu choi');
     const upd = await db.one(
       `UPDATE reservations SET minutes = minutes + $2, expires_at = expires_at + make_interval(mins => $2),
-         updated_at = now() WHERE id = $1 RETURNING *`, [row.id, minutes]);
+         extend_count = extend_count + 1, updated_at = now() WHERE id = $1 RETURNING *`, [row.id, minutes]);
     res.json(map.reservation({ ...row, ...upd }));
   }));
 

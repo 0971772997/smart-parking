@@ -2,14 +2,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Dimensions,
+  Linking,
+  Modal,
   Platform,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -22,11 +26,21 @@ import { lotsApi } from '../../api/lots';
 import { reservationsApi } from '../../api/reservations';
 import { vehiclesApi } from '../../api/vehicles';
 import { schedulesApi } from '../../api/schedules';
+import { authApi } from '../../api/auth';
 import { colors, radius, shadow } from '../../theme';
 import { formatDuration, nextArrival } from '../../utils/schedules';
 import { useFocusEffect } from '@react-navigation/native';
 
 const { width: SCREEN_W } = Dimensions.get('window');
+
+// Toạ độ mặc định (Trung tâm Đà Nẵng) làm chuẩn
+const DEFAULT_USER_COORDS = { lat: 16.0544, lng: 108.2022, name: 'Hải Châu, Đà Nẵng' };
+
+// Toạ độ thực tế của các bãi đỗ để tính khoảng cách
+const LOT_COORDS = {
+  'sp-demo-01': { lat: 16.0601, lng: 108.2155 },
+  'default': { lat: 16.0580, lng: 108.2100 },
+};
 
 // =====================================================================
 //  HELPERS & CONSTANTS
@@ -54,6 +68,21 @@ function formatTimeAgo(iso) {
   return `${Math.floor(hrs / 24)}d trước`;
 }
 
+// Tính khoảng cách Haversine (km)
+function calculateDistanceKm(lat1, lon1, lat2, lon2) {
+  const R = 6371; // bán kính Trái Đất (km)
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * (Math.PI / 180)) *
+      Math.cos(lat2 * (Math.PI / 180)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c * 10) / 10;
+}
+
 const TABS = [
   { key: 'lots', label: 'Bãi đỗ', icon: 'business-outline', iconActive: 'business' },
   { key: 'reservations', label: 'Đặt chỗ', icon: 'ticket-outline', iconActive: 'ticket' },
@@ -74,7 +103,7 @@ const RESV_CONFIG = {
 //  MAIN COMPONENT
 // =====================================================================
 export default function HomeScreen({ navigation }) {
-  const { user, signOut } = useAuth();
+  const { user, signOut, updateUser } = useAuth();
   const [activeTab, setActiveTab] = useState('lots');
   const [lots, setLots] = useState([]);
   const [reservations, setReservations] = useState([]);
@@ -82,14 +111,33 @@ export default function HomeScreen({ navigation }) {
   const [schedules, setSchedules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [expandedLotId, setExpandedLotId] = useState(null); // bai dang mo so do o
+  const [expandedLotId, setExpandedLotId] = useState(null);
   const [selectedLotDetail, setSelectedLotDetail] = useState(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const expandedRef = useRef(null);
 
+  // Vị trí người dùng (GPS)
+  const [userLocation, setUserLocation] = useState(DEFAULT_USER_COORDS);
+  const [locating, setLocating] = useState(false);
+
+  // Tìm kiếm, Lọc & Sắp xếp bãi đỗ
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState('distance'); // 'distance' | 'price' | 'slots'
+  const [filterFeature, setFilterFeature] = useState('all'); // 'all' | 'free' | 'ev' | 'roof'
+
+  // Modal: Thêm xe mới
+  const [showAddVehicleModal, setShowAddVehicleModal] = useState(false);
+  const [vehicleForm, setVehicleForm] = useState({ plateNumber: '', brand: '', color: '' });
+  const [savingVehicle, setSavingVehicle] = useState(false);
+
+  // Modal: Cập nhật hồ sơ
+  const [showEditProfileModal, setShowEditProfileModal] = useState(false);
+  const [profileForm, setProfileForm] = useState({ fullName: '', phone: '' });
+  const [savingProfile, setSavingProfile] = useState(false);
+
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
-  // Tải dữ liệu toàn diện (kèm sơ đồ ô của bãi đang mở, để màu ô luôn khớp thiết bị)
+  // Tải dữ liệu toàn diện
   const loadData = useCallback(async (isSilent = false) => {
     if (!isSilent) setLoading(true);
     const lotId = expandedRef.current;
@@ -105,7 +153,6 @@ export default function HomeScreen({ navigation }) {
       if (resvRes.status === 'fulfilled') setReservations(resvRes.value || []);
       if (vehRes.status === 'fulfilled') setVehicles(vehRes.value || []);
       if (schedRes.status === 'fulfilled') setSchedules(schedRes.value || []);
-      // Bỏ qua kết quả nếu người dùng đã đóng / đổi bãi trong lúc đang tải
       if (lotId && detailRes.status === 'fulfilled' && expandedRef.current === lotId) setSelectedLotDetail(detailRes.value);
     } catch {
       // bỏ qua lỗi im lặng nếu có
@@ -120,17 +167,41 @@ export default function HomeScreen({ navigation }) {
     Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
   }, [loadData, fadeAnim]);
 
-  // Tự đồng bộ mỗi 10s, chỉ khi màn hình đang hiển thị (sang màn khác thì dừng);
-  // quay lại từ màn Lịch gửi xe (có thể vừa đặt chỗ / sửa) -> làm mới ngay
-  const firstFocus = useRef(true);
   useFocusEffect(useCallback(() => {
-    if (firstFocus.current) firstFocus.current = false;
-    else loadData(true);
-    const interval = setInterval(() => loadData(true), 10000);
+    loadData(true);
+    const interval = setInterval(() => loadData(true), 12000);
     return () => clearInterval(interval);
   }, [loadData]));
 
-  // Mở / đóng sơ đồ ô của một bãi
+  // Lấy vị trí GPS hiện tại của người dùng
+  const handleGetLocation = () => {
+    setLocating(true);
+    if (typeof navigator !== 'undefined' && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setUserLocation({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            name: 'Vị trí GPS hiện tại',
+          });
+          setLocating(false);
+          Alert.alert('Định vị thành công', 'Đã cập nhật vị trí hiện tại của bạn.');
+        },
+        () => {
+          setLocating(false);
+          Alert.alert('Định vị', 'Đang sử dụng vị trí trung tâm: Hải Châu, Đà Nẵng.');
+        },
+        { timeout: 8000 }
+      );
+    } else {
+      setTimeout(() => {
+        setLocating(false);
+        Alert.alert('Định vị', 'Đang sử dụng vị trí trung tâm: Hải Châu, Đà Nẵng.');
+      }, 500);
+    }
+  };
+
+  // Mở / đóng sơ đồ ô
   const viewLotDetail = async (lotId) => {
     if (expandedRef.current === lotId) {
       expandedRef.current = null;
@@ -146,7 +217,7 @@ export default function HomeScreen({ navigation }) {
       const data = await lotsApi.detail(lotId);
       if (expandedRef.current === lotId) setSelectedLotDetail(data);
     } catch {
-      // giữ trống, lần đồng bộ sau sẽ thử lại
+      // giữ trống
     } finally {
       setLoadingDetail(false);
     }
@@ -157,17 +228,152 @@ export default function HomeScreen({ navigation }) {
     navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
   };
 
-  // Tính toán tóm tắt
+  // Mở Google Maps chỉ đường
+  const handleOpenDirections = (lot) => {
+    const query = encodeURIComponent(lot.address ? `${lot.name}, ${lot.address}` : lot.name);
+    const url = Platform.select({
+      ios: `maps://app?daddr=${query}`,
+      android: `google.navigation:q=${query}`,
+      default: `https://www.google.com/maps/dir/?api=1&destination=${query}`,
+    });
+    Linking.openURL(url).catch(() => {
+      Alert.alert('Chỉ đường', `Địa chỉ bãi đỗ: ${lot.address || lot.name}`);
+    });
+  };
+
+  // Thêm xe mới
+  const handleAddVehicle = async () => {
+    if (!vehicleForm.plateNumber.trim()) {
+      Alert.alert('Lỗi', 'Vui lòng nhập biển số xe.');
+      return;
+    }
+    setSavingVehicle(true);
+    try {
+      await vehiclesApi.create({
+        plateNumber: vehicleForm.plateNumber.trim().toUpperCase(),
+        brand: vehicleForm.brand.trim() || undefined,
+        color: vehicleForm.color.trim() || undefined,
+      });
+      Alert.alert('Thành công', 'Đã thêm phương tiện mới.');
+      setShowAddVehicleModal(false);
+      setVehicleForm({ plateNumber: '', brand: '', color: '' });
+      loadData(true);
+    } catch (e) {
+      Alert.alert('Lỗi', e.message || 'Không thể thêm xe.');
+    } finally {
+      setSavingVehicle(false);
+    }
+  };
+
+  // Xóa xe
+  const handleDeleteVehicle = (vehicle) => {
+    Alert.alert('Xóa phương tiện', `Bạn có chắc muốn xóa xe biển số ${vehicle.plateNumber}?`, [
+      { text: 'Hủy', style: 'cancel' },
+      {
+        text: 'Xóa ngay',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await vehiclesApi.remove(vehicle.id);
+            Alert.alert('Thành công', 'Đã xóa phương tiện.');
+            loadData(true);
+          } catch (e) {
+            Alert.alert('Lỗi', e.message || 'Không thể xóa xe.');
+          }
+        },
+      },
+    ]);
+  };
+
+  // Cập nhật hồ sơ
+  const handleUpdateProfile = async () => {
+    setSavingProfile(true);
+    try {
+      const res = await authApi.updateProfile({
+        fullName: profileForm.fullName.trim() || undefined,
+        phone: profileForm.phone.trim() || undefined,
+      });
+      updateUser(res);
+      Alert.alert('Thành công', 'Hồ sơ người dùng đã được cập nhật.');
+      setShowEditProfileModal(false);
+    } catch (e) {
+      Alert.alert('Lỗi', e.message || 'Không thể cập nhật hồ sơ.');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  // Tính khoảng cách & bổ sung thông tin tiện ích cho từng bãi đỗ
+  const enhancedLots = useMemo(() => {
+    return lots.map((l) => {
+      const coords = LOT_COORDS[l.id] || LOT_COORDS['default'];
+      const dist = calculateDistanceKm(userLocation.lat, userLocation.lng, coords.lat, coords.lng);
+      return {
+        ...l,
+        distanceKm: dist,
+        hours: '24/7 (Cả tuần)',
+        features: ['Mái che', 'Sạc điện EV', 'Camera an ninh', 'Barie tự động'],
+        isFull: (l.freeSlots || 0) === 0,
+        isMaintenance: !l.online,
+      };
+    });
+  }, [lots, userLocation]);
+
+  // Lọc và Sắp xếp danh sách bãi đỗ
+  const processedLots = useMemo(() => {
+    let result = enhancedLots;
+
+    // Tìm kiếm
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      result = result.filter(
+        (l) => l.name.toLowerCase().includes(q) || (l.address && l.address.toLowerCase().includes(q))
+      );
+    }
+
+    // Lọc tiện ích
+    if (filterFeature === 'free') {
+      result = result.filter((l) => (l.freeSlots || 0) > 0);
+    } else if (filterFeature === 'ev') {
+      result = result.filter((l) => l.features.includes('Sạc điện EV'));
+    } else if (filterFeature === 'roof') {
+      result = result.filter((l) => l.features.includes('Mái che'));
+    }
+
+    // Sắp xếp
+    if (sortBy === 'distance') {
+      result.sort((a, b) => a.distanceKm - b.distanceKm);
+    } else if (sortBy === 'price') {
+      result.sort((a, b) => (a.pricePerHour || 0) - (b.pricePerHour || 0));
+    } else if (sortBy === 'slots') {
+      result.sort((a, b) => (b.freeSlots || 0) - (a.freeSlots || 0));
+    }
+
+    return result;
+  }, [enhancedLots, searchQuery, filterFeature, sortBy]);
+
+  // Vé đang hiệu lực
   const activeReservation = useMemo(() => {
     return reservations.find((r) => r.status === 'active' || r.status === 'pending');
   }, [reservations]);
 
+  // Tóm tắt
   const summary = useMemo(() => {
     const totalFree = lots.reduce((acc, l) => acc + (l.freeSlots || 0), 0);
     const totalCap = lots.reduce((acc, l) => acc + (l.totalSlots || 0), 0);
+    const totalOccupied = Math.max(0, totalCap - totalFree);
     const onlineCount = lots.filter((l) => l.online).length;
-    return { totalFree, totalCap, onlineCount };
+    return { totalFree, totalCap, totalOccupied, onlineCount };
   }, [lots]);
+
+  // Bãi đỗ đề xuất tốt nhất (gần nhất & còn chỗ)
+  const recommendedLot = useMemo(() => {
+    const available = enhancedLots.filter((l) => l.online && (l.freeSlots || 0) > 0);
+    if (available.length > 0) {
+      return available.sort((a, b) => a.distanceKm - b.distanceKm)[0];
+    }
+    return enhancedLots[0];
+  }, [enhancedLots]);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -220,17 +426,115 @@ export default function HomeScreen({ navigation }) {
         }
       >
         <Animated.View style={{ opacity: fadeAnim }}>
-          {/* HERO ACTIVE RESERVATION HOẶC QUICK SUMMARY */}
+          {/* THANH THAO TÁC NHANH (QUICK ACTIONS) */}
+          <View style={styles.quickActionsBar}>
+            <Pressable
+              onPress={() => {
+                setActiveTab('lots');
+                setSortBy('distance');
+              }}
+              style={styles.quickActionItem}
+            >
+              <View style={[styles.quickActionIcon, { backgroundColor: '#EFF6FF' }]}>
+                <Ionicons name="locate" size={18} color="#2563EB" />
+              </View>
+              <Text style={styles.quickActionLabel}>Bãi gần nhất</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => setShowAddVehicleModal(true)}
+              style={styles.quickActionItem}
+            >
+              <View style={[styles.quickActionIcon, { backgroundColor: '#ECFDF5' }]}>
+                <Ionicons name="car-sport" size={18} color="#10B981" />
+              </View>
+              <Text style={styles.quickActionLabel}>Đăng ký xe</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => navigation.navigate('SetupParkingLot')}
+              style={styles.quickActionItem}
+            >
+              <View style={[styles.quickActionIcon, { backgroundColor: '#FFFBEB' }]}>
+                <Ionicons name="map" size={18} color="#D97706" />
+              </View>
+              <Text style={styles.quickActionLabel}>Sơ đồ ô đỗ</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() =>
+                activeReservation
+                  ? navigation.navigate('ReservationDetail', { id: activeReservation.id, initial: activeReservation })
+                  : navigation.navigate('Booking')
+              }
+              style={styles.quickActionItem}
+            >
+              <View style={[styles.quickActionIcon, { backgroundColor: '#F3E8FF' }]}>
+                <Ionicons name="ticket" size={18} color="#9333EA" />
+              </View>
+              <Text style={styles.quickActionLabel}>{activeReservation ? 'Vé của tôi' : 'Đặt chỗ'}</Text>
+            </Pressable>
+          </View>
+
+          {/* THANH XIN QUYỀN VỊ TRÍ & ĐỊNH VỊ HIỆN TẠI */}
+          <View style={styles.locationBar}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+              <Ionicons name="location-sharp" size={16} color="#2563EB" />
+              <Text style={styles.locationText} numberOfLines={1}>
+                {userLocation.name}
+              </Text>
+            </View>
+            <Pressable onPress={handleGetLocation} disabled={locating} style={styles.locationBtn} hitSlop={6}>
+              {locating ? (
+                <ActivityIndicator size="small" color="#2563EB" />
+              ) : (
+                <>
+                  <Ionicons name="navigate-circle" size={15} color="#2563EB" />
+                  <Text style={styles.locationBtnText}>Làm mới GPS</Text>
+                </>
+              )}
+            </Pressable>
+          </View>
+
+          {/* HERO ACTIVE RESERVATION HOẶC BÃI ĐỖ ĐƯỢC ĐỀ XUẤT */}
           {activeReservation ? (
-            <ActiveTicketCard resv={activeReservation} lots={lots} />
+            <ActiveTicketCard
+              resv={activeReservation}
+              lots={lots}
+              onPress={() => navigation.navigate('ReservationDetail', { id: activeReservation.id, initial: activeReservation })}
+            />
           ) : (
-            <CompactSummaryCard summary={summary} vehiclesCount={vehicles.length} />
+            <CompactSummaryCard
+              summary={summary}
+              recommendedLot={recommendedLot}
+              onNavigateMap={() => navigation.navigate('SetupParkingLot')}
+            />
           )}
 
-          {/* LOI TAT: LO TRINH CUA TOI */}
-          <SchedulesShortcut schedules={schedules} onPress={() => navigation.navigate('Schedules')} />
+          {/* LỐI TẮT BẢN ĐỒ & THIẾT LẬP (UI-007) */}
+          <Pressable
+            onPress={() => navigation.navigate('SetupParkingLot')}
+            style={({ pressed }) => [styles.routeShortcut, { marginBottom: 12 }, pressed && styles.btnPressed]}
+            accessibilityRole="button"
+          >
+            <View style={[styles.routeShortcutIcon, { backgroundColor: '#EFF6FF' }]}>
+              <Ionicons name="map-outline" size={20} color="#2563EB" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={styles.routeShortcutTitle}>Bản đồ Sơ đồ Ô đỗ Chân thực</Text>
+                <View style={{ backgroundColor: '#DBEAFE', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }}>
+                  <Text style={{ fontSize: 9.5, color: '#1D4ED8', fontWeight: '800' }}>UI-007</Text>
+                </View>
+              </View>
+              <Text style={styles.routeShortcutSub} numberOfLines={1}>
+                Xem vị trí từng ô vuông bãi đỗ • Làn xe • Cổng vào ra trực tiếp
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </Pressable>
 
-          {/* CLEAN NAVIGATION TABS */}
+          {/* TABS ĐIỀU HƯỚNG */}
           <View style={styles.tabContainer}>
             {TABS.map((tab) => {
               const isActive = activeTab === tab.key;
@@ -248,9 +552,7 @@ export default function HomeScreen({ navigation }) {
                   <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>
                     {tab.label}
                   </Text>
-                  {tab.key === 'reservations' && activeReservation && (
-                    <View style={styles.tabBadge} />
-                  )}
+                  {tab.key === 'reservations' && activeReservation && <View style={styles.tabBadge} />}
                   {tab.key === 'vehicles' && vehicles.length > 0 && (
                     <Text style={[styles.tabMiniCount, isActive && { color: colors.primary }]}>
                       {vehicles.length}
@@ -261,7 +563,7 @@ export default function HomeScreen({ navigation }) {
             })}
           </View>
 
-          {/* TAB CONTENTS */}
+          {/* NỘI DUNG TỪNG TAB */}
           {loading ? (
             <View style={styles.loadingBox}>
               <ActivityIndicator color={colors.primary} size="small" />
@@ -271,27 +573,165 @@ export default function HomeScreen({ navigation }) {
             <>
               {activeTab === 'lots' && (
                 <LotsTabSection
-                  lots={lots}
+                  lots={processedLots}
+                  searchQuery={searchQuery}
+                  setSearchQuery={setSearchQuery}
+                  sortBy={sortBy}
+                  setSortBy={setSortBy}
+                  filterFeature={filterFeature}
+                  setFilterFeature={setFilterFeature}
                   expandedLotId={expandedLotId}
                   selectedDetail={selectedLotDetail}
                   loadingDetail={loadingDetail}
                   onToggleDetail={viewLotDetail}
+                  onDirections={handleOpenDirections}
+                  onBook={(lotId, slotNumber) => navigation.navigate('Booking', { lotId, slotNumber })}
                 />
               )}
 
               {activeTab === 'reservations' && (
-                <ReservationsTabSection reservations={reservations} lots={lots} />
+                <ReservationsTabSection
+                  reservations={reservations}
+                  lots={lots}
+                  onOpen={(r) => navigation.navigate('ReservationDetail', { id: r.id, initial: r })}
+                  onNew={() => navigation.navigate('Booking')}
+                />
               )}
 
-              {activeTab === 'vehicles' && <VehiclesTabSection vehicles={vehicles} />}
+              {activeTab === 'vehicles' && (
+                <VehiclesTabSection
+                  vehicles={vehicles}
+                  onOpenAdd={() => setShowAddVehicleModal(true)}
+                  onDelete={handleDeleteVehicle}
+                />
+              )}
 
               {activeTab === 'account' && (
-                <AccountTabSection user={user} onLogout={handleLogout} />
+                <AccountTabSection
+                  user={user}
+                  onOpenEdit={() => {
+                    setProfileForm({ fullName: user?.fullName || '', phone: user?.phone || '' });
+                    setShowEditProfileModal(true);
+                  }}
+                  onLogout={handleLogout}
+                />
               )}
             </>
           )}
         </Animated.View>
       </ScrollView>
+
+      {/* MODAL: ĐĂNG KÝ XE MỚI */}
+      <Modal visible={showAddVehicleModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.dialogCard}>
+            <View style={styles.dialogHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="car-sport" size={20} color={colors.primary} />
+                <Text style={styles.dialogTitle}>Đăng ký Phương tiện</Text>
+              </View>
+              <Pressable onPress={() => setShowAddVehicleModal(false)} hitSlop={8}>
+                <Ionicons name="close" size={22} color={colors.textMuted} />
+              </Pressable>
+            </View>
+
+            <View style={styles.formField}>
+              <Text style={styles.formLabel}>Biển số xe *</Text>
+              <TextInput
+                style={styles.formInput}
+                placeholder="Ví dụ: 43A-123.45"
+                value={vehicleForm.plateNumber}
+                onChangeText={(t) => setVehicleForm((f) => ({ ...f, plateNumber: t }))}
+                autoCapitalize="characters"
+              />
+            </View>
+
+            <View style={styles.formField}>
+              <Text style={styles.formLabel}>Hãng xe / Dòng xe</Text>
+              <TextInput
+                style={styles.formInput}
+                placeholder="Ví dụ: VinFast VF8, Toyota Cross"
+                value={vehicleForm.brand}
+                onChangeText={(t) => setVehicleForm((f) => ({ ...f, brand: t }))}
+              />
+            </View>
+
+            <View style={styles.formField}>
+              <Text style={styles.formLabel}>Màu sắc</Text>
+              <TextInput
+                style={styles.formInput}
+                placeholder="Ví dụ: Trắng ngọc trai, Đen"
+                value={vehicleForm.color}
+                onChangeText={(t) => setVehicleForm((f) => ({ ...f, color: t }))}
+              />
+            </View>
+
+            <View style={styles.dialogActions}>
+              <Pressable onPress={() => setShowAddVehicleModal(false)} style={styles.cancelBtn}>
+                <Text style={styles.cancelBtnText}>Hủy bỏ</Text>
+              </Pressable>
+              <Pressable onPress={handleAddVehicle} disabled={savingVehicle} style={styles.saveBtn}>
+                {savingVehicle ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.saveBtnText}>Lưu phương tiện</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL: CẬP NHẬT HỒ SƠ NGƯỜI DÙNG */}
+      <Modal visible={showEditProfileModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.dialogCard}>
+            <View style={styles.dialogHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="person-circle" size={20} color={colors.primary} />
+                <Text style={styles.dialogTitle}>Cập nhật Hồ sơ Cá nhân</Text>
+              </View>
+              <Pressable onPress={() => setShowEditProfileModal(false)} hitSlop={8}>
+                <Ionicons name="close" size={22} color={colors.textMuted} />
+              </Pressable>
+            </View>
+
+            <View style={styles.formField}>
+              <Text style={styles.formLabel}>Họ và tên</Text>
+              <TextInput
+                style={styles.formInput}
+                placeholder="Nhập họ và tên đầy đủ"
+                value={profileForm.fullName}
+                onChangeText={(t) => setProfileForm((f) => ({ ...f, fullName: t }))}
+              />
+            </View>
+
+            <View style={styles.formField}>
+              <Text style={styles.formLabel}>Số điện thoại liên hệ</Text>
+              <TextInput
+                style={styles.formInput}
+                placeholder="Ví dụ: 0901234567"
+                keyboardType="phone-pad"
+                value={profileForm.phone}
+                onChangeText={(t) => setProfileForm((f) => ({ ...f, phone: t }))}
+              />
+            </View>
+
+            <View style={styles.dialogActions}>
+              <Pressable onPress={() => setShowEditProfileModal(false)} style={styles.cancelBtn}>
+                <Text style={styles.cancelBtnText}>Hủy bỏ</Text>
+              </Pressable>
+              <Pressable onPress={handleUpdateProfile} disabled={savingProfile} style={styles.saveBtn}>
+                {savingProfile ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.saveBtnText}>Lưu cập nhật</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -300,8 +740,7 @@ export default function HomeScreen({ navigation }) {
 //  SUB-SECTIONS & CARDS
 // =====================================================================
 
-/** Card tóm tắt nhanh khi không có vé giữ chỗ */
-function CompactSummaryCard({ summary, vehiclesCount }) {
+function CompactSummaryCard({ summary, recommendedLot, onNavigateMap }) {
   const percentAvailable = summary.totalCap
     ? Math.round((summary.totalFree / summary.totalCap) * 100)
     : 0;
@@ -311,66 +750,43 @@ function CompactSummaryCard({ summary, vehiclesCount }) {
       <View style={styles.heroHeader}>
         <View style={styles.heroBadge}>
           <Ionicons name="sparkles" size={13} color="#38BDF8" />
-          <Text style={styles.heroBadgeText}>Hệ thống thông minh</Text>
+          <Text style={styles.heroBadgeText}>Bãi đỗ thông minh IoT</Text>
         </View>
-        <Text style={styles.heroSubText}>Cập nhật trực tiếp qua MQTT</Text>
+        <Text style={styles.heroSubText}>Đồng bộ tức thời 24/7</Text>
       </View>
 
       <View style={styles.heroStatsRow}>
         <View style={styles.heroStatItem}>
           <Text style={styles.heroStatNum}>{summary.totalFree}</Text>
-          <Text style={styles.heroStatLabel}>Ô trống hiện tại</Text>
+          <Text style={styles.heroStatLabel}>Ô trống sẵn sàng</Text>
+        </View>
+        <View style={styles.heroDivider} />
+        <View style={styles.heroStatItem}>
+          <Text style={[styles.heroStatNum, { color: '#EF4444' }]}>{summary.totalOccupied}</Text>
+          <Text style={styles.heroStatLabel}>Chỗ đang có xe</Text>
         </View>
         <View style={styles.heroDivider} />
         <View style={styles.heroStatItem}>
           <Text style={[styles.heroStatNum, { color: '#38BDF8' }]}>{percentAvailable}%</Text>
-          <Text style={styles.heroStatLabel}>Tỷ lệ sẵn sàng</Text>
-        </View>
-        <View style={styles.heroDivider} />
-        <View style={styles.heroStatItem}>
-          <Text style={[styles.heroStatNum, { color: '#A78BFA' }]}>{vehiclesCount}</Text>
-          <Text style={styles.heroStatLabel}>Xe đã lưu</Text>
+          <Text style={styles.heroStatLabel}>Tỷ lệ trống</Text>
         </View>
       </View>
+
+      {/* GỢI Ý BÃI ĐỖ GẦN NHẤT */}
+      {recommendedLot && (
+        <Pressable onPress={onNavigateMap} style={styles.recommendedPill}>
+          <Ionicons name="navigate-circle" size={16} color="#38BDF8" />
+          <Text style={styles.recommendedPillText} numberOfLines={1}>
+            Gợi ý gần nhất: <Text style={{ fontWeight: '800', color: '#FFFFFF' }}>{recommendedLot.name}</Text> • Cách bạn {recommendedLot.distanceKm} km ({recommendedLot.freeSlots} ô trống)
+          </Text>
+          <Ionicons name="chevron-forward" size={14} color="#94A3B8" />
+        </Pressable>
+      )}
     </LinearGradient>
   );
 }
 
-/** Lối tắt tới màn Lịch gửi xe: hiện lần gửi xe sắp tới gần nhất */
-function SchedulesShortcut({ schedules, onPress }) {
-  const upcoming = useMemo(() => {
-    let best = null;
-    schedules.forEach((r) => {
-      if (!r.active) return;
-      const n = nextArrival(r);
-      if (n && (!best || n.date < best.next.date)) best = { schedule: r, next: n };
-    });
-    return best;
-  }, [schedules]);
-
-  return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.routeShortcut, pressed && styles.btnPressed]}
-      accessibilityRole="button" accessibilityLabel="Mở lịch gửi xe">
-      <View style={styles.routeShortcutIcon}>
-        <Ionicons name="calendar-outline" size={20} color={colors.primary} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.routeShortcutTitle}>
-          Lịch gửi xe{schedules.length ? ` (${schedules.length})` : ''}
-        </Text>
-        <Text style={styles.routeShortcutSub} numberOfLines={1}>
-          {upcoming
-            ? `${upcoming.schedule.name} • ${upcoming.next.inMinutes <= 180 ? `sau ${formatDuration(upcoming.next.inMinutes)}` : upcoming.next.label}`
-            : schedules.length ? 'Không có lịch nào sắp tới' : 'Lưu thói quen gửi xe để đặt chỗ nhanh 1 chạm'}
-        </Text>
-      </View>
-      <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-    </Pressable>
-  );
-}
-
-/** Card vé giữ chỗ đang hoạt động (Live Ticket) */
-function ActiveTicketCard({ resv, lots }) {
+function ActiveTicketCard({ resv, lots, onPress }) {
   const lot = lots.find((l) => l.id === resv.lotId);
   const cfg = RESV_CONFIG[resv.status] || RESV_CONFIG.active;
   const minsLeft = resv.expiresAt
@@ -378,7 +794,12 @@ function ActiveTicketCard({ resv, lots }) {
     : null;
 
   return (
-    <View style={styles.ticketCard}>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.ticketCard, pressed && styles.btnPressed]}
+      accessibilityRole="button"
+      accessibilityLabel="Xem chi tiết đặt chỗ"
+    >
       <View style={styles.ticketTopBar}>
         <View style={[styles.ticketBadge, { backgroundColor: cfg.bg }]}>
           <Ionicons name={cfg.icon} size={13} color={cfg.color} />
@@ -400,7 +821,7 @@ function ActiveTicketCard({ resv, lots }) {
           </Text>
         </View>
         <View style={styles.slotPill}>
-          <Text style={styles.slotPillLabel}>Ô ĐỖ</Text>
+          <Text style={styles.slotPillLabel}>{resv.zone ? `KHU ${resv.zone}` : 'Ô ĐỖ'}</Text>
           <Text style={styles.slotPillNum}>#{resv.slotNumber}</Text>
         </View>
       </View>
@@ -408,170 +829,327 @@ function ActiveTicketCard({ resv, lots }) {
       <View style={styles.ticketFooter}>
         <View style={styles.ticketMeta}>
           <Ionicons name="time-outline" size={14} color={colors.textMuted} />
-          <Text style={styles.ticketMetaText}>Thời hạn: {resv.minutes} phút</Text>
+          <Text style={styles.ticketMetaText}>Giữ chỗ: {resv.minutes} phút</Text>
         </View>
         <View style={styles.ticketMeta}>
-          <Ionicons name="calendar-outline" size={14} color={colors.textMuted} />
-          <Text style={styles.ticketMetaText}>{formatTimeAgo(resv.createdAt)}</Text>
+          <Ionicons name="qr-code-outline" size={14} color={colors.textMuted} />
+          <Text style={styles.ticketMetaText}>{resv.code || formatTimeAgo(resv.createdAt)}</Text>
         </View>
+        <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
       </View>
-    </View>
+    </Pressable>
   );
 }
 
-/** Tab 1: Danh sách bãi đỗ & Sơ đồ ô */
-function LotsTabSection({ lots, expandedLotId, selectedDetail, loadingDetail, onToggleDetail }) {
-  if (lots.length === 0) {
-    return <EmptyNotice icon="business-outline" title="Chưa có bãi đỗ nào" subtitle="Hệ thống đang được cập nhật thêm trạm mới." />;
-  }
-
+/** Tab 1: Danh sách bãi đỗ với bộ lọc, tìm kiếm, sắp xếp & tiện ích */
+function LotsTabSection({
+  lots,
+  searchQuery,
+  setSearchQuery,
+  sortBy,
+  setSortBy,
+  filterFeature,
+  setFilterFeature,
+  expandedLotId,
+  selectedDetail,
+  loadingDetail,
+  onToggleDetail,
+  onDirections,
+  onBook,
+}) {
   return (
     <View style={styles.sectionWrap}>
-      <View style={styles.sectionHeading}>
-        <Text style={styles.sectionTitle}>Bãi đỗ xe trực tuyến</Text>
-        <Text style={styles.sectionSubTitle}>{lots.length} trạm hỗ trợ</Text>
+      {/* THANH TÌM KIẾM BÃI ĐỖ */}
+      <View style={styles.searchBar}>
+        <Ionicons name="search" size={17} color={colors.textMuted} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Tìm bãi đỗ xe theo tên, đường, khu vực..."
+          placeholderTextColor={colors.placeholder}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+        {searchQuery ? (
+          <Pressable onPress={() => setSearchQuery('')} hitSlop={8}>
+            <Ionicons name="close-circle" size={17} color={colors.textMuted} />
+          </Pressable>
+        ) : null}
       </View>
 
-      {lots.map((lot) => {
-        const isExpanded = expandedLotId === lot.id;
-        const freeCount = lot.freeSlots ?? 0;
-        const total = lot.totalSlots || 0;
-        const freeRatio = total ? Math.min(100, Math.round((freeCount / total) * 100)) : 0;
+      {/* BỘ LỌC VÀ SẮP XẾP NHANH */}
+      <View style={styles.filterChipRow}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+          <Pressable
+            onPress={() => setSortBy('distance')}
+            style={[styles.filterChip, sortBy === 'distance' && styles.filterChipActive]}
+          >
+            <Ionicons name="navigate" size={12} color={sortBy === 'distance' ? '#2563EB' : colors.textMuted} />
+            <Text style={[styles.filterChipText, sortBy === 'distance' && styles.filterChipTextActive]}>
+              Gần nhất
+            </Text>
+          </Pressable>
 
-        return (
-          <View key={lot.id} style={styles.lotCard}>
-            <View style={styles.lotCardHeader}>
-              <View style={{ flex: 1 }}>
-                <View style={styles.lotNameRow}>
-                  <Text style={styles.lotNameText}>{lot.name}</Text>
-                  <View style={[styles.iotBadge, lot.online ? styles.iotOnline : styles.iotOffline]}>
-                    <Text style={[styles.iotText, lot.online ? styles.iotTextOnline : styles.iotTextOffline]}>
-                      {lot.online ? 'Online' : 'Offline'}
-                    </Text>
-                  </View>
-                </View>
-                {lot.address ? <Text style={styles.lotAddressText}>{lot.address}</Text> : null}
-              </View>
+          <Pressable
+            onPress={() => setSortBy('price')}
+            style={[styles.filterChip, sortBy === 'price' && styles.filterChipActive]}
+          >
+            <Ionicons name="pricetag" size={12} color={sortBy === 'price' ? '#2563EB' : colors.textMuted} />
+            <Text style={[styles.filterChipText, sortBy === 'price' && styles.filterChipTextActive]}>
+              Giá rẻ nhất
+            </Text>
+          </Pressable>
 
-              <View style={styles.lotPriceTag}>
-                <Text style={styles.lotPriceText}>{formatVND(lot.pricePerHour)}</Text>
-                <Text style={styles.lotPriceUnit}>/giờ</Text>
-              </View>
-            </View>
+          <Pressable
+            onPress={() => setFilterFeature(filterFeature === 'free' ? 'all' : 'free')}
+            style={[styles.filterChip, filterFeature === 'free' && styles.filterChipActive]}
+          >
+            <Ionicons name="checkmark-circle" size={12} color={filterFeature === 'free' ? '#2563EB' : colors.textMuted} />
+            <Text style={[styles.filterChipText, filterFeature === 'free' && styles.filterChipTextActive]}>
+              Còn chỗ trống
+            </Text>
+          </Pressable>
 
-            {/* Thanh tiến độ ô trống */}
-            <View style={styles.meterContainer}>
-              <View style={styles.meterTrack}>
-                <View
-                  style={[
-                    styles.meterFill,
-                    {
-                      width: `${freeRatio}%`,
-                      backgroundColor: freeRatio > 40 ? '#10B981' : freeRatio > 15 ? '#F59E0B' : '#EF4444',
-                    },
-                  ]}
-                />
-              </View>
-              <View style={styles.meterLabels}>
-                <Text style={styles.meterValueText}>
-                  <Text style={{ fontWeight: '700', color: colors.text }}>{freeCount}</Text>/{total} ô còn trống
-                </Text>
-                <Text style={styles.meterPercentText}>{freeRatio}% khả dụng</Text>
-              </View>
-            </View>
+          <Pressable
+            onPress={() => setFilterFeature(filterFeature === 'ev' ? 'all' : 'ev')}
+            style={[styles.filterChip, filterFeature === 'ev' && styles.filterChipActive]}
+          >
+            <Ionicons name="flash" size={12} color={filterFeature === 'ev' ? '#2563EB' : colors.textMuted} />
+            <Text style={[styles.filterChipText, filterFeature === 'ev' && styles.filterChipTextActive]}>
+              Sạc EV
+            </Text>
+          </Pressable>
 
-            {/* Trạng thái cổng vào/ra */}
-            <View style={styles.gateStatusBar}>
-              <View style={styles.gateItem}>
-                <Ionicons
-                  name={lot.gates?.entry === 'open' ? 'lock-open' : 'lock-closed'}
-                  size={13}
-                  color={lot.gates?.entry === 'open' ? '#10B981' : colors.textMuted}
-                />
-                <Text style={styles.gateLabel}>
-                  Cổng vào: <Text style={styles.gateState}>{lot.gates?.entry === 'open' ? 'Mở' : 'Đóng'}</Text>
-                </Text>
-              </View>
+          <Pressable
+            onPress={() => setFilterFeature(filterFeature === 'roof' ? 'all' : 'roof')}
+            style={[styles.filterChip, filterFeature === 'roof' && styles.filterChipActive]}
+          >
+            <Ionicons name="umbrella" size={12} color={filterFeature === 'roof' ? '#2563EB' : colors.textMuted} />
+            <Text style={[styles.filterChipText, filterFeature === 'roof' && styles.filterChipTextActive]}>
+              Có mái che
+            </Text>
+          </Pressable>
+        </ScrollView>
+      </View>
 
-              <View style={styles.gateItem}>
-                <Ionicons
-                  name={lot.gates?.exit === 'open' ? 'lock-open' : 'lock-closed'}
-                  size={13}
-                  color={lot.gates?.exit === 'open' ? '#10B981' : colors.textMuted}
-                />
-                <Text style={styles.gateLabel}>
-                  Cổng ra: <Text style={styles.gateState}>{lot.gates?.exit === 'open' ? 'Mở' : 'Đóng'}</Text>
-                </Text>
-              </View>
+      <View style={styles.sectionHeading}>
+        <Text style={styles.sectionTitle}>Bãi đỗ xe trực tuyến</Text>
+        <Text style={styles.sectionSubTitle}>{lots.length} kết quả phù hợp</Text>
+      </View>
 
-              <Pressable
-                onPress={() => onToggleDetail(lot.id)}
-                style={({ pressed }) => [styles.viewDetailBtn, pressed && styles.btnPressed]}
-              >
-                <Text style={styles.viewDetailBtnText}>
-                  {isExpanded ? 'Ẩn sơ đồ' : 'Sơ đồ ô'}
-                </Text>
-                <Ionicons
-                  name={isExpanded ? 'chevron-up' : 'chevron-down'}
-                  size={14}
-                  color={colors.primary}
-                />
-              </Pressable>
-            </View>
+      {lots.length === 0 ? (
+        <EmptyNotice
+          icon="business-outline"
+          title="Không tìm thấy bãi đỗ phù hợp"
+          subtitle="Hãy thử thay đổi từ khóa tìm kiếm hoặc bỏ bớt bộ lọc."
+        />
+      ) : (
+        lots.map((lot) => {
+          const isExpanded = expandedLotId === lot.id;
+          const freeCount = lot.freeSlots ?? 0;
+          const total = lot.totalSlots || 0;
+          const occupiedCount = Math.max(0, total - freeCount);
+          const freeRatio = total ? Math.min(100, Math.round((freeCount / total) * 100)) : 0;
 
-            {/* SƠ ĐỒ Ô ĐỖ THỜI GIAN THỰC (Mở rộng) */}
-            {isExpanded && (
-              <View style={styles.slotGridWrap}>
-                <View style={styles.slotGridHeader}>
-                  <Text style={styles.slotGridTitle}>Sơ đồ vị trí các ô đỗ</Text>
-                  <View style={styles.slotLegends}>
-                    <LegendItem color="#10B981" label="Trống" />
-                    <LegendItem color="#EF4444" label="Có xe" />
-                    <LegendItem color="#F59E0B" label="Đã đặt" />
-                  </View>
-                </View>
-
-                {!lot.online && (
-                  <Text style={styles.slotOfflineNote}>
-                    Bãi đang offline – đây là trạng thái lần cuối thiết bị gửi về.
+          return (
+            <View
+              key={lot.id}
+              style={[
+                styles.lotCard,
+                lot.isFull && styles.lotCardFull,
+                lot.isMaintenance && styles.lotCardMaintenance,
+              ]}
+            >
+              {/* CẢNH BÁO NẾU BÃI HẾT CHỖ HOẶC TẠM NGỪNG */}
+              {lot.isFull && (
+                <View style={styles.alertFullBar}>
+                  <Ionicons name="alert-circle" size={14} color="#DC2626" />
+                  <Text style={styles.alertFullText}>
+                    BÃI ĐÃ HẾT CHỖ – Vui lòng chọn bãi đỗ lân cận còn trống
                   </Text>
-                )}
-                {loadingDetail && !selectedDetail ? (
-                  <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 14 }} />
-                ) : (
-                  <View style={styles.slotsRow}>
-                    {(selectedDetail?.slots || []).map((s) => {
-                      const isFree = s.state === 'free';
-                      const isOccupied = s.state === 'occupied';
-                      const color = isFree ? '#10B981' : isOccupied ? '#EF4444' : '#F59E0B';
-                      const bg = isFree ? '#ECFDF5' : isOccupied ? '#FEF2F2' : '#FFFBEB';
+                </View>
+              )}
+              {lot.isMaintenance && (
+                <View style={styles.alertMaintenanceBar}>
+                  <Ionicons name="construct" size={14} color="#D97706" />
+                  <Text style={styles.alertMaintenanceText}>
+                    TẠM NGỪNG HOẠT ĐỘNG – Trạm đang bảo trì tín hiệu
+                  </Text>
+                </View>
+              )}
 
-                      return (
-                        <View key={s.id} style={[styles.slotItem, { borderColor: color, backgroundColor: bg }]}>
-                          <Ionicons
-                            name={isFree ? 'radio-button-off' : 'car'}
-                            size={18}
-                            color={color}
-                          />
-                          <Text style={[styles.slotItemNum, { color }]}>Ô #{s.slotNumber}</Text>
-                          {/* Chỉ hiện khoảng cách khi có xe (≥ 400 cm = cảm biến không thấy vật) */}
-                          {isOccupied && s.distanceCm && s.distanceCm < 400 ? (
-                            <Text style={styles.slotItemDist}>{s.distanceCm} cm</Text>
-                          ) : !isFree && !isOccupied ? (
-                            <Text style={styles.slotItemDist}>Đã đặt trước</Text>
-                          ) : (
-                            <Text style={styles.slotItemDist}>{isFree ? 'Sẵn sàng' : 'Đang đỗ'}</Text>
-                          )}
-                        </View>
-                      );
-                    })}
+              <View style={styles.lotCardHeader}>
+                <View style={{ flex: 1 }}>
+                  <View style={styles.lotNameRow}>
+                    <Text style={styles.lotNameText}>{lot.name}</Text>
+                    <View style={[styles.iotBadge, lot.online ? styles.iotOnline : styles.iotOffline]}>
+                      <Text style={[styles.iotText, lot.online ? styles.iotTextOnline : styles.iotTextOffline]}>
+                        {lot.online ? 'Online' : 'Offline'}
+                      </Text>
+                    </View>
                   </View>
-                )}
+                  {lot.address ? <Text style={styles.lotAddressText}>{lot.address}</Text> : null}
+
+                  {/* KHOẢNG CÁCH & GIỜ HOẠT ĐỘNG */}
+                  <View style={styles.metaRow}>
+                    <View style={styles.metaBadge}>
+                      <Ionicons name="navigate" size={11} color="#2563EB" />
+                      <Text style={styles.metaBadgeText}>Cách {lot.distanceKm} km</Text>
+                    </View>
+                    <View style={styles.metaBadge}>
+                      <Ionicons name="time-outline" size={11} color={colors.textMuted} />
+                      <Text style={styles.metaBadgeText}>{lot.hours}</Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* BẢNG GIÁ */}
+                <View style={styles.lotPriceTag}>
+                  <Text style={styles.lotPriceText}>{formatVND(lot.pricePerHour)}</Text>
+                  <Text style={styles.lotPriceUnit}>/giờ</Text>
+                </View>
               </View>
-            )}
-          </View>
-        );
-      })}
+
+              {/* TIỆN ÍCH CỦA BÃI XE */}
+              <View style={styles.featureTagsRow}>
+                {lot.features.map((feat, idx) => (
+                  <View key={idx} style={styles.featureTag}>
+                    <Text style={styles.featureTagText}>{feat}</Text>
+                  </View>
+                ))}
+              </View>
+
+              {/* THỐNG KÊ SỨC CHỨA KHU VỰC: TỔNG SỐ CHỖ, CHỖ TRỐNG, ĐANG CÓ XE */}
+              <View style={styles.capacityStatsBar}>
+                <View style={styles.capacityItem}>
+                  <Text style={styles.capacityNum}>{total}</Text>
+                  <Text style={styles.capacityLabel}>Tổng số chỗ</Text>
+                </View>
+                <View style={styles.capacityDivider} />
+                <View style={styles.capacityItem}>
+                  <Text style={[styles.capacityNum, { color: '#10B981' }]}>{freeCount}</Text>
+                  <Text style={styles.capacityLabel}>Chỗ trống</Text>
+                </View>
+                <View style={styles.capacityDivider} />
+                <View style={styles.capacityItem}>
+                  <Text style={[styles.capacityNum, { color: '#EF4444' }]}>{occupiedCount}</Text>
+                  <Text style={styles.capacityLabel}>Đang có xe</Text>
+                </View>
+              </View>
+
+              {/* THANH ĐO TIẾN ĐỘ SỨC CHỨA */}
+              <View style={styles.meterContainer}>
+                <View style={styles.meterTrack}>
+                  <View
+                    style={[
+                      styles.meterFill,
+                      {
+                        width: `${freeRatio}%`,
+                        backgroundColor: freeRatio > 40 ? '#10B981' : freeRatio > 15 ? '#F59E0B' : '#EF4444',
+                      },
+                    ]}
+                  />
+                </View>
+                <View style={styles.meterLabels}>
+                  <Text style={styles.meterValueText}>
+                    Tình trạng: <Text style={{ fontWeight: '700', color: colors.text }}>{freeCount}</Text>/{total} ô trống
+                  </Text>
+                  <Text style={styles.meterPercentText}>{freeRatio}% khả dụng</Text>
+                </View>
+              </View>
+
+              {/* NÚT THAO TÁC: CHỈ ĐƯỜNG & SƠ ĐỒ Ô */}
+              <View style={styles.lotActionFooter}>
+                <Pressable
+                  onPress={() => onDirections(lot)}
+                  style={styles.directionsBtn}
+                  hitSlop={6}
+                >
+                  <Ionicons name="navigate-outline" size={14} color="#2563EB" />
+                  <Text style={styles.directionsBtnText}>Chỉ đường</Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => onBook(lot.id)}
+                  style={({ pressed }) => [styles.directionsBtn, pressed && styles.btnPressed]}
+                  hitSlop={6}
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="ticket-outline" size={14} color="#2563EB" />
+                  <Text style={styles.directionsBtnText}>Đặt chỗ</Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => onToggleDetail(lot.id)}
+                  style={({ pressed }) => [styles.viewDetailBtn, pressed && styles.btnPressed]}
+                >
+                  <Text style={styles.viewDetailBtnText}>
+                    {isExpanded ? 'Ẩn sơ đồ ô' : 'Xem sơ đồ ô đỗ'}
+                  </Text>
+                  <Ionicons
+                    name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                    size={14}
+                    color={colors.primary}
+                  />
+                </Pressable>
+              </View>
+
+              {/* SƠ ĐỒ Ô ĐỖ TRỰC QUAN THEO THỜI GIAN THỰC */}
+              {isExpanded && (
+                <View style={styles.slotGridWrap}>
+                  <View style={styles.slotGridHeader}>
+                    <Text style={styles.slotGridTitle}>Sơ đồ vị trí các ô đỗ</Text>
+                    <View style={styles.slotLegends}>
+                      <LegendItem color="#10B981" label="Trống" />
+                      <LegendItem color="#EF4444" label="Có xe" />
+                      <LegendItem color="#F59E0B" label="Đã đặt" />
+                    </View>
+                  </View>
+
+                  {loadingDetail && !selectedDetail ? (
+                    <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 14 }} />
+                  ) : (
+                    <View style={styles.slotsRow}>
+                      {(selectedDetail?.slots || []).map((s) => {
+                        const isFree = s.state === 'free';
+                        const isOccupied = s.state === 'occupied';
+                        const color = isFree ? '#10B981' : isOccupied ? '#EF4444' : '#F59E0B';
+                        const bg = isFree ? '#ECFDF5' : isOccupied ? '#FEF2F2' : '#FFFBEB';
+
+                        return (
+                          <Pressable
+                            key={s.id}
+                            disabled={!isFree}
+                            onPress={() => onBook(lot.id, s.slotNumber)}
+                            style={({ pressed }) => [styles.slotItem, { borderColor: color, backgroundColor: bg }, pressed && styles.btnPressed]}
+                            accessibilityRole="button"
+                            accessibilityLabel={isFree ? `Đặt ô ${s.slotNumber}` : `Ô ${s.slotNumber}`}
+                          >
+                            <Ionicons
+                              name={isFree ? 'radio-button-off' : 'car'}
+                              size={18}
+                              color={color}
+                            />
+                            <Text style={[styles.slotItemNum, { color }]}>
+                              {s.zone ? `${s.zone}·` : 'Ô '}#{s.slotNumber}
+                            </Text>
+                            {isOccupied && s.distanceCm && s.distanceCm < 400 ? (
+                              <Text style={styles.slotItemDist}>{s.distanceCm} cm</Text>
+                            ) : (
+                              <Text style={styles.slotItemDist}>
+                                {isFree ? 'Chạm để đặt' : isOccupied ? 'Đang đỗ' : 'Đã giữ'}
+                              </Text>
+                            )}
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  )}
+                </View>
+              )}
+            </View>
+          );
+        })
+      )}
     </View>
   );
 }
@@ -585,10 +1163,30 @@ function LegendItem({ color, label }) {
   );
 }
 
-/** Tab 2: Lịch sử & Danh sách đặt chỗ */
-function ReservationsTabSection({ reservations, lots }) {
+/** Tab 2: Lịch sử đặt chỗ */
+function ReservationsTabSection({ reservations, lots, onOpen, onNew }) {
+  const newBtn = (
+    <Pressable
+      onPress={onNew}
+      style={({ pressed }) => [styles.directionsBtn, { alignSelf: 'flex-start', marginBottom: 10 }, pressed && styles.btnPressed]}
+      accessibilityRole="button"
+    >
+      <Ionicons name="add-circle-outline" size={15} color="#2563EB" />
+      <Text style={styles.directionsBtnText}>Đặt chỗ mới</Text>
+    </Pressable>
+  );
+
   if (reservations.length === 0) {
-    return <EmptyNotice icon="ticket-outline" title="Chưa có đặt chỗ" subtitle="Khi bạn đặt chỗ trước, thông tin vé sẽ xuất hiện tại đây." />;
+    return (
+      <View>
+        {newBtn}
+        <EmptyNotice
+          icon="ticket-outline"
+          title="Chưa có đặt chỗ"
+          subtitle="Khi bạn đặt chỗ trước, thông tin vé sẽ xuất hiện tại đây."
+        />
+      </View>
+    );
   }
 
   return (
@@ -597,13 +1195,19 @@ function ReservationsTabSection({ reservations, lots }) {
         <Text style={styles.sectionTitle}>Lịch sử đặt chỗ</Text>
         <Text style={styles.sectionSubTitle}>{reservations.length} lượt ghi nhận</Text>
       </View>
+      {newBtn}
 
       {reservations.map((item) => {
         const lot = lots.find((l) => l.id === item.lotId);
         const cfg = RESV_CONFIG[item.status] || RESV_CONFIG.pending;
 
         return (
-          <View key={item.id} style={styles.historyCard}>
+          <Pressable
+            key={item.id}
+            onPress={() => onOpen(item)}
+            style={({ pressed }) => [styles.historyCard, pressed && styles.btnPressed]}
+            accessibilityRole="button"
+          >
             <View style={styles.historyLeft}>
               <View style={[styles.historyIconCircle, { backgroundColor: cfg.bg }]}>
                 <Ionicons name={cfg.icon} size={18} color={cfg.color} />
@@ -611,7 +1215,7 @@ function ReservationsTabSection({ reservations, lots }) {
               <View style={{ flex: 1 }}>
                 <Text style={styles.historyLotName}>{lot?.name || item.lotId}</Text>
                 <Text style={styles.historyMeta}>
-                  Ô số #{item.slotNumber} • {item.minutes} phút
+                  {item.zone ? `Khu ${item.zone} • ` : ''}Ô #{item.slotNumber} • giữ {item.minutes} phút{item.code ? ` • ${item.code}` : ''}
                 </Text>
               </View>
             </View>
@@ -622,60 +1226,77 @@ function ReservationsTabSection({ reservations, lots }) {
               </View>
               <Text style={styles.historyTimeAgo}>{formatTimeAgo(item.createdAt)}</Text>
             </View>
-          </View>
+          </Pressable>
         );
       })}
     </View>
   );
 }
 
-/** Tab 3: Xe cá nhân */
-function VehiclesTabSection({ vehicles }) {
-  if (vehicles.length === 0) {
-    return <EmptyNotice icon="car-sport-outline" title="Chưa có xe nào được lưu" subtitle="Đăng ký biển số xe giúp hệ thống nhận diện tự động khi tới bãi." />;
-  }
-
+/** Tab 3: Xe cá nhân (Hỗ trợ thêm xe & xóa xe) */
+function VehiclesTabSection({ vehicles, onOpenAdd, onDelete }) {
   return (
     <View style={styles.sectionWrap}>
       <View style={styles.sectionHeading}>
-        <Text style={styles.sectionTitle}>Phương tiện đã đăng ký</Text>
-        <Text style={styles.sectionSubTitle}>{vehicles.length} xe cá nhân</Text>
+        <View>
+          <Text style={styles.sectionTitle}>Phương tiện đã đăng ký</Text>
+          <Text style={styles.sectionSubTitle}>{vehicles.length} xe cá nhân đã lưu</Text>
+        </View>
+
+        <Pressable onPress={onOpenAdd} style={styles.addVehicleHeaderBtn}>
+          <Ionicons name="add" size={16} color="#FFFFFF" />
+          <Text style={styles.addVehicleHeaderBtnText}>Thêm xe mới</Text>
+        </Pressable>
       </View>
 
-      {vehicles.map((v) => (
-        <View key={v.id} style={styles.vehicleCard}>
-          <View style={styles.vehiclePlateBox}>
-            <Text style={styles.vehiclePlatePrefix}>VN</Text>
-            <Text style={styles.vehiclePlateNum}>{v.plateNumber}</Text>
-          </View>
+      {vehicles.length === 0 ? (
+        <EmptyNotice
+          icon="car-sport-outline"
+          title="Chưa có phương tiện nào"
+          subtitle="Hãy bấm '+ Thêm xe mới' để đăng ký biển số giúp hệ thống tự động nhận diện."
+        />
+      ) : (
+        vehicles.map((v) => (
+          <View key={v.id} style={styles.vehicleCard}>
+            <View style={styles.vehiclePlateBox}>
+              <Text style={styles.vehiclePlatePrefix}>VN</Text>
+              <Text style={styles.vehiclePlateNum}>{v.plateNumber}</Text>
+            </View>
 
-          <View style={styles.vehicleDetails}>
-            <Text style={styles.vehicleBrandText}>{v.brand || 'Xe ô tô'}</Text>
-            <View style={styles.vehicleColorRow}>
-              <Ionicons name="color-palette-outline" size={13} color={colors.textMuted} />
-              <Text style={styles.vehicleColorText}>{v.color || 'Màu tiêu chuẩn'}</Text>
+            <View style={styles.vehicleDetails}>
+              <Text style={styles.vehicleBrandText}>{v.brand || 'Xe ô tô'}</Text>
+              <View style={styles.vehicleColorRow}>
+                <Ionicons name="color-palette-outline" size={13} color={colors.textMuted} />
+                <Text style={styles.vehicleColorText}>{v.color || 'Màu tiêu chuẩn'}</Text>
+              </View>
+            </View>
+
+            <View style={{ alignItems: 'flex-end', gap: 6 }}>
+              <View style={styles.vehicleActiveTag}>
+                <Ionicons name="checkmark-circle" size={13} color="#10B981" />
+                <Text style={styles.vehicleActiveText}>Khả dụng</Text>
+              </View>
+              <Pressable onPress={() => onDelete(v)} style={styles.deleteVehicleBtn} hitSlop={6}>
+                <Ionicons name="trash-outline" size={15} color="#EF4444" />
+                <Text style={styles.deleteVehicleBtnText}>Xóa</Text>
+              </Pressable>
             </View>
           </View>
-
-          <View style={styles.vehicleActiveTag}>
-            <Ionicons name="checkmark-circle" size={14} color="#10B981" />
-            <Text style={styles.vehicleActiveText}>Khả dụng</Text>
-          </View>
-        </View>
-      ))}
+        ))
+      )}
     </View>
   );
 }
 
-/** Tab 4: Hồ sơ & Cài đặt */
-function AccountTabSection({ user, onLogout }) {
+/** Tab 4: Hồ sơ & Cài đặt (Hỗ trợ cập nhật hồ sơ) */
+function AccountTabSection({ user, onOpenEdit, onLogout }) {
   return (
     <View style={styles.sectionWrap}>
       <View style={styles.profileBox}>
         <View style={styles.avatarWrap}>
-          <Ionicons name="person" size={30} color="#1D4ED8" />
+          <Ionicons name="person" size={28} color="#1D4ED8" />
         </View>
-        <View style={{ flex: 1, marginLeft: 14 }}>
+        <View style={{ flex: 1, marginLeft: 12 }}>
           <Text style={styles.profileFullName}>
             {user?.fullName || user?.username || 'Chưa cập nhật tên'}
           </Text>
@@ -683,12 +1304,17 @@ function AccountTabSection({ user, onLogout }) {
             {user?.role === 'admin' ? '🛡️ Quản trị viên hệ thống' : '👤 Khách hàng tiêu chuẩn'}
           </Text>
         </View>
+
+        <Pressable onPress={onOpenEdit} style={styles.editProfileBtn}>
+          <Ionicons name="create-outline" size={16} color="#2563EB" />
+          <Text style={styles.editProfileBtnText}>Sửa</Text>
+        </Pressable>
       </View>
 
       <View style={styles.detailsCard}>
         <ProfileField icon="mail-outline" label="Địa chỉ Email" value={user?.email} />
         <ProfileField icon="at-outline" label="Tên đăng nhập" value={user?.username} />
-        <ProfileField icon="call-outline" label="Số điện thoại" value={user?.phone} />
+        <ProfileField icon="call-outline" label="Số điện thoại" value={user?.phone || 'Chưa cập nhật'} />
         <ProfileField icon="shield-checkmark-outline" label="Quyền tài khoản" value={user?.role === 'admin' ? 'Quản trị (Admin)' : 'Người dùng'} />
         {user?.linked?.google && (
           <ProfileField icon="logo-google" label="Google" value="Đã liên kết" valueColor="#10B981" />
@@ -740,20 +1366,19 @@ function EmptyNotice({ icon, title, subtitle }) {
 }
 
 // =====================================================================
-//  STYLES - CLEAN, MODERN, COMPACT
+//  STYLES
 // =====================================================================
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#FFFFFF' },
   container: { flex: 1, backgroundColor: '#F8FAFC' },
-  scrollContent: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 36 },
+  scrollContent: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 36 },
 
-  // Header gọn gàng
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 18,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#F1F5F9',
@@ -786,29 +1411,88 @@ const styles = StyleSheet.create({
   },
   btnPressed: { opacity: 0.7, transform: [{ scale: 0.98 }] },
 
-  // Hero Card (Tổng quan)
-  heroCard: {
-    borderRadius: radius.lg,
-    padding: 18,
-    marginBottom: 16,
+  // Quick Actions Bar
+  quickActionsBar: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    borderRadius: radius.md,
+    padding: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    justifyContent: 'space-between',
     ...shadow.card,
   },
-  heroHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
+  quickActionItem: { flex: 1, alignItems: 'center' },
+  quickActionIcon: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  quickActionLabel: { fontSize: 11, fontWeight: '600', color: colors.text },
+
+  // Location Bar
+  locationBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: radius.md,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  locationText: { fontSize: 12, fontWeight: '600', color: '#1E40AF' },
+  locationBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#FFFFFF', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  locationBtnText: { fontSize: 11, fontWeight: '700', color: '#2563EB' },
+
+  // Hero Card
+  heroCard: {
+    borderRadius: radius.lg,
+    padding: 16,
+    marginBottom: 12,
+    ...shadow.card,
+  },
+  heroHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   heroBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(56,189,248,0.15)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.pill },
   heroBadgeText: { fontSize: 11, color: '#38BDF8', fontWeight: '700' },
   heroSubText: { fontSize: 11, color: '#94A3B8' },
   heroStatsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   heroStatItem: { flex: 1, alignItems: 'center' },
-  heroStatNum: { fontSize: 24, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5 },
-  heroStatLabel: { fontSize: 11, color: '#94A3B8', marginTop: 3 },
-  heroDivider: { width: 1, height: 32, backgroundColor: 'rgba(255,255,255,0.1)' },
+  heroStatNum: { fontSize: 22, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5 },
+  heroStatLabel: { fontSize: 10.5, color: '#94A3B8', marginTop: 3 },
+  heroDivider: { width: 1, height: 28, backgroundColor: 'rgba(255,255,255,0.1)' },
+  recommendedPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 8,
+    padding: 8,
+    marginTop: 12,
+    gap: 6,
+  },
+  recommendedPillText: { flex: 1, fontSize: 11.5, color: '#E2E8F0' },
 
-  // Vé đặt chỗ nổi bật (Live Ticket)
+  // Shortcut
+  routeShortcut: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    padding: 12,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 10,
+    ...shadow.card,
+  },
+  routeShortcutIcon: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+  routeShortcutTitle: { fontSize: 13.5, fontWeight: '700', color: colors.text },
+  routeShortcutSub: { fontSize: 11.5, color: colors.textMuted, marginTop: 2 },
+
+  // Ticket Card
   ticketCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: radius.lg,
     padding: 16,
-    marginBottom: 16,
+    marginBottom: 12,
     borderWidth: 1.5,
     borderColor: '#3B82F6',
     ...shadow.card,
@@ -818,32 +1502,23 @@ const styles = StyleSheet.create({
   ticketBadgeText: { fontSize: 11.5, fontWeight: '700' },
   ticketTimer: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#FFF7ED', paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.pill },
   ticketTimerText: { fontSize: 11.5, color: '#EA580C', fontWeight: '700' },
-  ticketMain: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginVertical: 6 },
-  ticketLotName: { fontSize: 17, fontWeight: '800', color: colors.text },
+  ticketMain: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginVertical: 4 },
+  ticketLotName: { fontSize: 16, fontWeight: '800', color: colors.text },
   ticketAddress: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
-  slotPill: { backgroundColor: '#EFF6FF', paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.md, alignItems: 'center', borderWidth: 1, borderColor: '#BFDBFE' },
-  slotPillLabel: { fontSize: 10, fontWeight: '700', color: colors.primary },
-  slotPillNum: { fontSize: 17, fontWeight: '900', color: colors.primary },
-  ticketFooter: { flexDirection: 'row', alignItems: 'center', gap: 16, marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F1F5F9' },
+  slotPill: { backgroundColor: '#EFF6FF', paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.md, alignItems: 'center', borderWidth: 1, borderColor: '#BFDBFE' },
+  slotPillLabel: { fontSize: 9.5, fontWeight: '700', color: colors.primary },
+  slotPillNum: { fontSize: 16, fontWeight: '900', color: colors.primary },
+  ticketFooter: { flexDirection: 'row', alignItems: 'center', gap: 16, marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F1F5F9' },
   ticketMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  ticketMetaText: { fontSize: 12, color: colors.textMuted },
+  ticketMetaText: { fontSize: 11.5, color: colors.textMuted },
 
-  // Lối tắt Lịch gửi xe
-  routeShortcut: {
-    flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FFFFFF', borderRadius: radius.md,
-    padding: 12, marginBottom: 16, borderWidth: 1, borderColor: '#E2E8F0',
-  },
-  routeShortcutIcon: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center' },
-  routeShortcutTitle: { fontSize: 14, fontWeight: '700', color: colors.text },
-  routeShortcutSub: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
-
-  // Tabs điều hướng tinh tế
+  // Tabs
   tabContainer: {
     flexDirection: 'row',
     backgroundColor: '#FFFFFF',
     borderRadius: radius.md,
     padding: 4,
-    marginBottom: 16,
+    marginBottom: 14,
     borderWidth: 1,
     borderColor: '#E2E8F0',
   },
@@ -856,9 +1531,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     gap: 6,
   },
-  tabButtonActive: {
-    backgroundColor: '#EFF6FF',
-  },
+  tabButtonActive: { backgroundColor: '#EFF6FF' },
   tabLabel: { fontSize: 12.5, fontWeight: '600', color: colors.textMuted },
   tabLabelActive: { color: colors.primary, fontWeight: '700' },
   tabBadge: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#EA580C', position: 'absolute', top: 6, right: 6 },
@@ -874,15 +1547,51 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 15, fontWeight: '700', color: colors.text },
   sectionSubTitle: { fontSize: 12, color: colors.textMuted },
 
+  // Search & Filter
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: radius.md,
+    paddingHorizontal: 12,
+    height: 40,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 8,
+  },
+  searchInput: { flex: 1, fontSize: 13, color: colors.text, height: '100%' },
+  filterChipRow: { marginBottom: 4 },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  filterChipActive: { backgroundColor: '#EFF6FF', borderColor: '#2563EB' },
+  filterChipText: { fontSize: 11.5, color: colors.textMuted, fontWeight: '600' },
+  filterChipTextActive: { color: '#2563EB', fontWeight: '700' },
+
   // Lot Card
   lotCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: radius.md,
-    padding: 16,
+    padding: 14,
     borderWidth: 1,
     borderColor: '#E2E8F0',
     ...shadow.card,
   },
+  lotCardFull: { borderColor: '#FECACA', backgroundColor: '#FFFDFD' },
+  lotCardMaintenance: { borderColor: '#FDE68A', opacity: 0.85 },
+  alertFullBar: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FEF2F2', padding: 6, borderRadius: 6, marginBottom: 10 },
+  alertFullText: { fontSize: 11, color: '#DC2626', fontWeight: '700' },
+  alertMaintenanceBar: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FFFBEB', padding: 6, borderRadius: 6, marginBottom: 10 },
+  alertMaintenanceText: { fontSize: 11, color: '#D97706', fontWeight: '700' },
+
   lotCardHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
   lotNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   lotNameText: { fontSize: 15, fontWeight: '700', color: colors.text },
@@ -892,46 +1601,66 @@ const styles = StyleSheet.create({
   iotText: { fontSize: 10, fontWeight: '700' },
   iotTextOnline: { color: '#10B981' },
   iotTextOffline: { color: '#64748B' },
-  lotAddressText: { fontSize: 12, color: colors.textMuted, marginTop: 4 },
+  lotAddressText: { fontSize: 12, color: colors.textMuted, marginTop: 3 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+  metaBadge: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  metaBadgeText: { fontSize: 11, color: colors.textMuted, fontWeight: '500' },
   lotPriceTag: { alignItems: 'flex-end', backgroundColor: '#F8FAFC', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
   lotPriceText: { fontSize: 13, fontWeight: '800', color: colors.primary },
   lotPriceUnit: { fontSize: 10, color: colors.textMuted },
 
-  // Meter (Thanh đo)
-  meterContainer: { marginTop: 14 },
+  featureTagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+  featureTag: { backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  featureTagText: { fontSize: 10.5, color: colors.textMuted, fontWeight: '500' },
+
+  // Sức chứa
+  capacityStatsBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 6,
+    paddingVertical: 8,
+    marginTop: 10,
+  },
+  capacityItem: { flex: 1, alignItems: 'center' },
+  capacityNum: { fontSize: 14, fontWeight: '800', color: colors.text },
+  capacityLabel: { fontSize: 10, color: colors.textMuted, marginTop: 2 },
+  capacityDivider: { width: 1, height: 18, backgroundColor: '#E2E8F0' },
+
+  // Meter
+  meterContainer: { marginTop: 10 },
   meterTrack: { height: 6, backgroundColor: '#F1F5F9', borderRadius: 3, overflow: 'hidden' },
   meterFill: { height: '100%', borderRadius: 3 },
-  meterLabels: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 },
-  meterValueText: { fontSize: 12, color: colors.textMuted },
+  meterLabels: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 5 },
+  meterValueText: { fontSize: 11.5, color: colors.textMuted },
   meterPercentText: { fontSize: 11, fontWeight: '600', color: colors.textMuted },
 
-  // Gate & Actions
-  gateStatusBar: {
+  // Action Footer
+  lotActionFooter: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 12,
-    paddingTop: 10,
+    marginTop: 10,
+    paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: '#F8FAFC',
   },
-  gateItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  gateLabel: { fontSize: 11.5, color: colors.textMuted },
-  gateState: { fontWeight: '600', color: colors.text },
+  directionsBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#EFF6FF', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 },
+  directionsBtnText: { fontSize: 12, fontWeight: '700', color: '#2563EB' },
   viewDetailBtn: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingVertical: 4 },
   viewDetailBtnText: { fontSize: 12, fontWeight: '700', color: colors.primary },
 
-  // Slot Grid trực quan
-  slotGridWrap: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#F1F5F9' },
-  slotGridHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  // Slot Grid
+  slotGridWrap: { marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F1F5F9' },
+  slotGridHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   slotGridTitle: { fontSize: 12, fontWeight: '700', color: colors.text },
-  slotLegends: { flexDirection: 'row', gap: 10 },
+  slotLegends: { flexDirection: 'row', gap: 8 },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   legendDot: { width: 6, height: 6, borderRadius: 3 },
-  legendLabel: { fontSize: 10, color: colors.textMuted },
+  legendText: { fontSize: 10, color: colors.textMuted },
   slotsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   slotItem: {
-    width: (SCREEN_W - 36 - 32 - 16) / 3, // 3 cột cân đối
+    width: (SCREEN_W - 32 - 28 - 16) / 3,
     paddingVertical: 10,
     borderRadius: 8,
     borderWidth: 1,
@@ -940,7 +1669,6 @@ const styles = StyleSheet.create({
   },
   slotItemNum: { fontSize: 12, fontWeight: '800' },
   slotItemDist: { fontSize: 10, color: colors.textMuted },
-  slotOfflineNote: { fontSize: 11, color: '#B45309', backgroundColor: '#FFFBEB', padding: 8, borderRadius: 6, marginBottom: 10 },
 
   // History Card
   historyCard: {
@@ -948,80 +1676,86 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: '#FFFFFF',
-    padding: 14,
+    padding: 12,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: '#E2E8F0',
   },
   historyLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
   historyIconCircle: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
-  historyLotName: { fontSize: 14, fontWeight: '700', color: colors.text },
-  historyMeta: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  historyLotName: { fontSize: 13.5, fontWeight: '700', color: colors.text },
+  historyMeta: { fontSize: 11.5, color: colors.textMuted, marginTop: 2 },
   historyRight: { alignItems: 'flex-end', gap: 4 },
   historyStatusBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: radius.pill },
-  historyStatusText: { fontSize: 11, fontWeight: '700' },
+  historyStatusText: { fontSize: 10.5, fontWeight: '700' },
   historyTimeAgo: { fontSize: 10, color: colors.textMuted },
 
-  // Vehicle Card
+  // Vehicle Card & Add
+  addVehicleHeaderBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.primary, paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.pill },
+  addVehicleHeaderBtnText: { color: '#FFFFFF', fontSize: 11.5, fontWeight: '700' },
   vehicleCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    padding: 14,
+    padding: 12,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    gap: 12,
+    gap: 10,
   },
   vehiclePlateBox: {
     backgroundColor: '#0F172A',
     borderRadius: 6,
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     paddingVertical: 6,
     alignItems: 'center',
-    minWidth: 84,
+    minWidth: 80,
   },
-  vehiclePlatePrefix: { fontSize: 9, color: '#94A3B8', fontWeight: '800' },
-  vehiclePlateNum: { fontSize: 14, fontWeight: '900', color: '#FFFFFF', letterSpacing: 0.5 },
+  vehiclePlatePrefix: { fontSize: 8.5, color: '#94A3B8', fontWeight: '800' },
+  vehiclePlateNum: { fontSize: 13, fontWeight: '900', color: '#FFFFFF', letterSpacing: 0.5 },
   vehicleDetails: { flex: 1 },
-  vehicleBrandText: { fontSize: 14, fontWeight: '700', color: colors.text },
+  vehicleBrandText: { fontSize: 13.5, fontWeight: '700', color: colors.text },
   vehicleColorRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
-  vehicleColorText: { fontSize: 12, color: colors.textMuted },
-  vehicleActiveTag: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#ECFDF5', paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.pill },
-  vehicleActiveText: { fontSize: 11, fontWeight: '700', color: '#10B981' },
+  vehicleColorText: { fontSize: 11.5, color: colors.textMuted },
+  vehicleActiveTag: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#ECFDF5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.pill },
+  vehicleActiveText: { fontSize: 10.5, fontWeight: '700', color: '#10B981' },
+  deleteVehicleBtn: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingVertical: 2 },
+  deleteVehicleBtnText: { fontSize: 11, color: '#EF4444', fontWeight: '600' },
 
-  // Profile Card
+  // Profile
   profileBox: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    padding: 16,
+    padding: 14,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: '#E2E8F0',
   },
   avatarWrap: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: '#EFF6FF',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  profileFullName: { fontSize: 16, fontWeight: '800', color: colors.text },
-  profileRoleBadge: { fontSize: 12, color: colors.textMuted, marginTop: 4 },
+  profileFullName: { fontSize: 15, fontWeight: '800', color: colors.text },
+  profileRoleBadge: { fontSize: 11.5, color: colors.textMuted, marginTop: 3 },
+  editProfileBtn: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#EFF6FF', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6 },
+  editProfileBtnText: { fontSize: 12, fontWeight: '700', color: '#2563EB' },
   detailsCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: radius.md,
-    padding: 14,
+    padding: 12,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    gap: 10,
+    gap: 8,
   },
-  fieldRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 },
+  fieldRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 3 },
   fieldLabelWrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  fieldLabel: { fontSize: 13, color: colors.textMuted },
-  fieldValue: { fontSize: 13, fontWeight: '600', color: colors.text, maxWidth: 180 },
+  fieldLabel: { fontSize: 12.5, color: colors.textMuted },
+  fieldValue: { fontSize: 12.5, fontWeight: '600', color: colors.text, maxWidth: 180 },
   logoutCardBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1033,13 +1767,35 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#FECACA',
   },
-  logoutCardBtnText: { fontSize: 13.5, fontWeight: '700', color: '#DC2626' },
-  appFooterInfo: { alignItems: 'center', marginTop: 10 },
+  logoutCardBtnText: { fontSize: 13, fontWeight: '700', color: '#DC2626' },
+  appFooterInfo: { alignItems: 'center', marginTop: 8 },
   appFooterText: { fontSize: 11, color: colors.placeholder },
 
+  // Modal dialogs
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
+  dialogCard: { backgroundColor: '#FFFFFF', borderRadius: radius.lg, padding: 18, ...shadow.card },
+  dialogHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
+  dialogTitle: { fontSize: 15, fontWeight: '800', color: colors.text },
+  formField: { marginBottom: 12 },
+  formLabel: { fontSize: 12, fontWeight: '600', color: colors.textMuted, marginBottom: 5 },
+  formInput: {
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    height: 40,
+    fontSize: 13,
+    color: colors.text,
+  },
+  dialogActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 10 },
+  cancelBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 6, backgroundColor: '#F1F5F9' },
+  cancelBtnText: { fontSize: 12.5, fontWeight: '600', color: colors.textMuted },
+  saveBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 6, backgroundColor: colors.primary },
+  saveBtnText: { fontSize: 12.5, fontWeight: '700', color: '#FFFFFF' },
+
   // Empty
-  emptyWrap: { alignItems: 'center', paddingVertical: 36, gap: 6 },
-  emptyIconCircle: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
-  emptyTitle: { fontSize: 14, fontWeight: '700', color: colors.text },
+  emptyWrap: { alignItems: 'center', paddingVertical: 32, gap: 5 },
+  emptyIconCircle: { width: 46, height: 46, borderRadius: 23, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  emptyTitle: { fontSize: 13.5, fontWeight: '700', color: colors.text },
   emptySub: { fontSize: 12, color: colors.textMuted, textAlign: 'center', maxWidth: 260 },
 });

@@ -1,13 +1,15 @@
 # Smart Parking API – Lab 2
 
-Node.js + Express · PostgreSQL (Neon) · MQTT (HiveMQ Cloud) · Deploy Render (gói Free)
+Node.js + Express · PostgreSQL (Neon) · MQTT (broker HiveMQ công khai) · Deploy Render (gói Free)
+
+> Nguyên lý hệ thống và giao thức MQTT: xem [`../docs/MQTT_va_nguyen_ly_he_thong.md`](../docs/MQTT_va_nguyen_ly_he_thong.md). Biên bản kiểm thử: [`../docs/KIEM_THU.md`](../docs/KIEM_THU.md).
 
 ```
  App di động ──HTTPS/JSON──►  API (Render)  ──SQL──►  PostgreSQL (Neon)
                                  ▲   │
                        status/event   cmd (+requestId, chờ ack)
                                  │   ▼
-                          Broker MQTT (HiveMQ Cloud, TLS)
+                      Broker MQTT (broker.hivemq.com)
                                  ▲   │
                                  │   ▼
                             ESP32 (bãi đỗ xe)
@@ -43,11 +45,15 @@ Node.js + Express · PostgreSQL (Neon) · MQTT (HiveMQ Cloud) · Deploy Render (
 | `slots` | Ô đỗ và trạng thái hiện tại `free/occupied/reserved` | UNIQUE(`lot_id`,`slot_number`) |
 | `reservations` | Đặt chỗ: `pending→active→fulfilled/cancelled/expired/failed` | UNIQUE `request_id`; index duy nhất: mỗi ô chỉ có 1 đặt chỗ đang hiệu lực |
 | `parking_sessions` | Lượt đỗ (xe vào → xe ra), thời gian, phí | FK `slot_id`, `reservation_id` |
+| `payments` | **Giao dịch** thanh toán phí gửi xe: mã GD, số tiền, hình thức (`cash/card/momo/zalopay/bank`), admin thu tiền | `code` UNIQUE, `session_id` UNIQUE (mỗi lượt đỗ chỉ trả 1 lần) |
+| `parking_schedules` | Lịch gửi xe thường xuyên của tài xế (bãi, xe, giờ đến, ngày lặp, phút giữ chỗ) | FK `user_id`, `lot_id`, `vehicle_id` |
 | `device_events` | Nhật ký thô các sự kiện từ ESP32 (JSONB) | index (`lot_id`, `created_at`) |
 
-Quan hệ: `users 1–n vehicles`, `users 1–n reservations`, `parking_lots 1–n slots`, `slots 1–n reservations`, `slots 1–n parking_sessions`, `reservations 1–0..1 parking_sessions`, `parking_lots 1–n device_events`.
+Quan hệ: `users 1–n vehicles`, `users 1–n reservations`, `parking_lots 1–n slots`, `slots 1–n reservations`, `slots 1–n parking_sessions`, `reservations 1–0..1 parking_sessions`, `parking_sessions 1–0..1 payments`, `users 1–n payments`, `users 1–n parking_schedules`, `parking_lots 1–n device_events`.
 
 Phí đỗ được tính tròn lên theo giờ, tối thiểu 1 giờ, nhân với `price_per_hour` của bãi.
+
+**Luồng thanh toán:** đặt chỗ → xe vào ô (ESP32 báo `slot_changed`) → mở lượt đỗ → xe ra → server tính `fee` → lượt đỗ ở trạng thái *chưa thanh toán* → tài xế trả qua app (`POST /sessions/:id/pay`) hoặc admin thu tiền mặt tại cổng → tạo giao dịch. Cổng thanh toán hiện là **giả lập** (trả về thành công ngay); điểm gắn cổng thật (MoMo/VNPay…) là hàm `pay()` trong `src/routes/payments.js`.
 
 ## 2. API
 
@@ -72,16 +78,22 @@ Khi lỗi, API trả về: `{ "error": "<ma_loi>", "message": "...", "details"?:
 | GET | `/lots` | – | Danh sách bãi đỗ kèm `freeSlots` |
 | GET | `/lots/:lotId` | – | Chi tiết bãi: online, barie, số ô trống/có xe/đặt, danh sách `slots` |
 | GET | `/lots/:lotId/slots` | – | Danh sách ô |
-| POST | `/lots/:lotId/reservations` | user | `{slotNumber, minutes(1-120)=15, vehicleId?}`, gửi lệnh tới ESP32 |
-| GET | `/reservations?status=` | user | Lịch sử đặt chỗ của tôi |
+| POST | `/lots/:lotId/reservations` | user | `{zone?, slotNumber?, minutes(5-120)=15, durationMinutes(30-1440)=120, vehicleId?}`. Không có `slotNumber` → tự chọn ô trống trong khu. Gửi lệnh tới ESP32, 201 khi ESP32 xác nhận |
+| GET | `/reservations/rules` | user | Quy tắc đặt chỗ + số lần không đến / thời điểm hết khoá của tôi |
+| GET | `/reservations?status=active,pending` | user | Lịch sử đặt chỗ của tôi (lọc nhiều trạng thái) |
 | GET | `/reservations/:id` | user | Chi tiết đặt chỗ |
-| POST | `/reservations/:id/extend` | user | `{minutes}`, gia hạn (tổng tối đa 240 phút) |
+| POST | `/reservations/:id/extend` | user | `{minutes(5-30)}`, tối đa 2 lần, khi chỗ còn đang giữ |
 | DELETE | `/reservations/:id` | user | Huỷ đặt chỗ |
 | POST | `/lots` | admin | Tạo bãi mới `{id, name, address?, totalSlots, pricePerHour?}` |
 | POST | `/lots/:lotId/gates/:entry\|exit/:open\|close` | admin | Mở/đóng barie từ xa |
 | GET | `/lots/:lotId/sessions?limit=` | admin | Lịch sử lượt đỗ và phí |
 | GET | `/lots/:lotId/events?type=&limit=` | admin | Nhật ký sự kiện ESP32 |
 | GET | `/lots/:lotId/stats?date=YYYY-MM-DD` | admin | Thống kê ngày (giờ VN): số lượt, doanh thu, thời gian trung bình, đặt chỗ, % lấp đầy |
+| GET | `/sessions/mine` | user | Lượt đỗ của tôi: `status` = `parking` (đang đỗ, có `estimatedFee`) / `unpaid` / `paid` (kèm `payment`) |
+| POST | `/sessions/:id/pay` | user | Thanh toán lượt đỗ đã kết thúc `{method: card\|momo\|zalopay\|bank}` → giao dịch (mã `GD…`) |
+| GET | `/payments` | user | Lịch sử giao dịch của tôi |
+| GET | `/payments/:id` | user | Chi tiết giao dịch (biên lai) |
+| POST | `/lots/:lotId/sessions/:id/pay` | admin | Thu tiền tại cổng (mặc định `cash`), kể cả khách vãng lai |
 
 Mã lỗi thường gặp:
 
@@ -90,12 +102,20 @@ Mã lỗi thường gặp:
 | 400 | `validation_error`, `invalid_json`, `invalid_gate`, `vehicle_not_found` | Dữ liệu gửi lên sai |
 | 401 | `unauthorized`, `invalid_token`, `invalid_credentials` | Chưa đăng nhập, token sai/hết hạn, hoặc sai email/mật khẩu |
 | 403 | `forbidden` | Không có quyền admin |
-| 404 | `not_found`, `lot_not_found`, `reservation_not_found` | Không tìm thấy |
-| 409 | `email_taken`, `plate_taken`, `slot_not_free`, `already_has_reservation`, `reservation_not_active` | Xung đột dữ liệu |
+| 403 | `booking_suspended` (kèm `details.suspendedUntil`) | Bị khoá đặt chỗ do không đến nhiều lần |
+| 404 | `not_found`, `lot_not_found`, `zone_not_found`, `slot_not_found`, `reservation_not_found`, `session_not_found`, `payment_not_found` | Không tìm thấy |
+| 409 | `email_taken`, `plate_taken`, `slot_not_free`, `already_has_reservation`, `reservation_not_active`, `zone_full`, `lot_full`, `extend_limit`, `reservation_expired`, `session_not_ended`, `already_paid` | Xung đột dữ liệu |
 | 503 | `device_offline` | ESP32 đang mất kết nối |
 | 504 | `device_timeout` | ESP32 không trả `ack` trong 8 giây |
 
 Có thể thử API bằng tay qua file `api.http` (extension **REST Client** trong VS Code).
+
+### Quy tắc đặt chỗ (`src/booking.js`)
+- Chọn **bãi → khu vực (A/B, chia đôi dãy ô) → ô** (hoặc để hệ thống tự chọn ô trống nhỏ nhất trong khu) → **thời gian giữ chỗ** (5–120 phút, app gợi ý 15/30/45/60) → **thời lượng gửi dự kiến** (30 phút–24 giờ) → phí dự kiến = số giờ làm tròn lên × giá/giờ.
+- **Xác nhận**: đặt chỗ `pending` chỉ thành `active` khi ESP32 trả `ack ok` (ghi `confirmed_at`, giờ hết hạn tính từ lúc này); ESP32 từ chối/không phản hồi → `failed`. Mỗi lượt có mã `DC-XXXXXX` để đối chiếu tại cổng.
+- Mỗi tài khoản giữ tối đa **1** chỗ. Huỷ miễn phí khi `active`. Gia hạn tối đa **2 lần**, mỗi lần ≤ **30 phút**.
+- **Hết hạn**: ESP32 tự trả ô và gửi `reservation_expired`; ngoài ra server tự đánh dấu `expired` khi quá giờ + 60 giây (kiểm tra "lười" mỗi khi đọc/đặt chỗ, không chạy định kỳ để Neon được ngủ). `pending` treo > 60 giây → `failed`.
+- **Không đến**: mỗi lượt `expired` = 1 lần không đến; **3 lần trong 7 ngày → khoá đặt chỗ 24 giờ** (403 `booking_suspended`).
 
 ## 3. Chạy và test trên máy
 
@@ -103,7 +123,7 @@ Có thể thử API bằng tay qua file `api.http` (extension **REST Client** tr
 npm install
 npm run migrate      # tạo bảng và dữ liệu mẫu (bãi sp-demo-01, 4 ô)
 npm run dev          # http://localhost:3000
-npm test             # 28 test tự động, chạy trên nhánh DB Neon "test" (.env.test), ESP32 được giả lập
+npm test             # 46 test tự động, chạy trên nhánh DB Neon "test" (.env.test), ESP32 được giả lập
 node scripts/e2e.js http://localhost:3000 <admin-email> <admin-pass>   # test thật với ESP32/Wokwi qua MQTT
 ```
 
@@ -113,7 +133,7 @@ Biến môi trường được mô tả trong `.env.example`.
 
 | Loại test | Môi trường | Kết quả |
 |---|---|---|
-| Test tự động (`npm test`) | Nhánh DB Neon `test`, ESP32 giả lập | **28/28 PASS** |
+| Test tự động (`npm test`) | Nhánh DB Neon `test`, ESP32 giả lập | **46/46 PASS** (20/11/2026: thêm lịch gửi xe, thanh toán, đồng bộ khoảng cách) |
 | End-to-end (`scripts/e2e.js`) | API trên máy + ESP32 trên Wokwi + broker | **11/11 PASS** |
 | End-to-end | **API trên Render** + Neon + ESP32 trên Wokwi | **11/11 PASS**, ESP32 phản hồi đặt chỗ trong khoảng 0,6 giây |
 | Mất kết nối | Tắt ESP32 → khoảng 15 giây sau gọi đặt chỗ | `503 device_offline` trả về trong 181 ms |

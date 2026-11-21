@@ -9,5 +9,14 @@ export const lotsApi = {
 
   /** Danh sach o do cua 1 bai */
   slots: (lotId, opts) => request(`/lots/${lotId}/slots`, opts),
+
+  /** Them bai do moi (Admin) */
+  create: (body, opts) => request('/lots', { method: 'POST', body, ...opts }),
+
+  /** Chinh sua thong tin bai do (Admin) */
+  update: (lotId, body, opts) => request(`/lots/${lotId}`, { method: 'PUT', body, ...opts }),
+
+  /** Xoa bai do (Admin) */
+  remove: (lotId, opts) => request(`/lots/${lotId}`, { method: 'DELETE', ...opts }),
 };
 

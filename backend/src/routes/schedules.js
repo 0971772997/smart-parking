@@ -38,7 +38,7 @@ function parseBody(body, partial) {
   if (has('arriveTime')) out.arrive_time = v.str(body, 'arriveTime', { pattern: TIME_RE });
   const days = parseDays(body, partial);
   if (days !== undefined) out.days = days;
-  if (has('minutes')) out.minutes = v.int(body, 'minutes', { min: 1, max: 120, def: partial ? undefined : 15 });
+  if (has('minutes')) out.minutes = v.int(body, 'minutes', { min: 5, max: 120, def: partial ? undefined : 15 });
   if (has('note')) out.note = v.str(body, 'note', { max: 255, optional: true });
   if (has('active')) {
     if (body?.active === undefined) out.active = true;

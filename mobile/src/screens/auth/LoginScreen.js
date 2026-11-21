@@ -69,12 +69,16 @@ export default function LoginScreen({ navigation, route }) {
 
   async function onLogin() {
     const e = {};
-    if (!isEmail(email)) e.email = 'Vui lòng nhập email hợp lệ';
+    const trimmed = email.trim();
+    const isPhone = /^0\d{9}$/.test(trimmed) || /^\+?84\d{9}$/.test(trimmed);
+    if (!isEmail(trimmed) && !isPhone) {
+      e.email = 'Vui lòng nhập email hoặc số điện thoại hợp lệ';
+    }
     if (!password) e.password = 'Vui lòng nhập mật khẩu';
     setErrs(e);
     if (Object.keys(e).length) return;
 
-    const id = email.trim().toLowerCase();
+    const id = trimmed.toLowerCase();
     setError(''); setInfo(''); setHint(''); setBusy(true); setSlow(false);
     try {
       const res = await authApi.login(id, password, { onSlow: () => setSlow(true) });
@@ -112,11 +116,11 @@ export default function LoginScreen({ navigation, route }) {
       {busy && slow ? <Notice type="info">{SLOW_MSG}</Notice> : null}
 
       <TextField
-        label="ID (Email)"
-        icon="mail-outline"
-        placeholder="Nhập email"
+        label="Email hoặc Số điện thoại"
+        icon="person-outline"
+        placeholder="Nhập email hoặc số điện thoại"
         keyboardType="email-address"
-        autoComplete="email"
+        autoComplete="username"
         textContentType="username"
         value={email}
         onChangeText={edit(setEmail, 'email')}

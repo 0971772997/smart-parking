@@ -1,8 +1,10 @@
 import { request } from './client';
 
 export const authApi = {
-  login: (email, password, opts) => request('/auth/login', { method: 'POST', body: { email, password }, ...opts }),
+  login: (identifier, password, opts) =>
+    request('/auth/login', { method: 'POST', body: { identifier, password }, ...opts }),
   me: (opts) => request('/auth/me', opts),
+  updateProfile: (body, opts) => request('/auth/me', { method: 'PATCH', body, ...opts }),
   register: (body, opts) => request('/auth/register', { method: 'POST', body, ...opts }),
   social: (provider, token) => request('/auth/social', { method: 'POST', body: { provider, token } }),
 

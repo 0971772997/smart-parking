@@ -134,3 +134,29 @@ CREATE TABLE IF NOT EXISTS parking_schedules (
   updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_parking_schedules_user ON parking_schedules (user_id, arrive_time);
+
+-- v6: Giao dich thanh toan phi gui xe (moi luot do da ket thuc -> 1 giao dich)
+-- Cong thanh toan dang GIA LAP (tra ve thanh cong ngay); method ghi lai hinh thuc tai xe chon.
+CREATE TABLE IF NOT EXISTS payments (
+  id           SERIAL PRIMARY KEY,
+  code         VARCHAR(24)  NOT NULL UNIQUE,                 -- ma giao dich, vd GD20261120-7KQ2XA
+  session_id   INT NOT NULL UNIQUE REFERENCES parking_sessions(id) ON DELETE CASCADE, -- moi luot do chi tra 1 lan
+  user_id      INT REFERENCES users(id) ON DELETE SET NULL,   -- NULL = khach vang lai (admin thu tien mat)
+  amount       INT NOT NULL CHECK (amount >= 0),             -- VND
+  method       VARCHAR(10)  NOT NULL CHECK (method IN ('cash', 'card', 'momo', 'zalopay', 'bank')),
+  collected_by INT REFERENCES users(id) ON DELETE SET NULL,   -- admin thu tien mat tai cong
+  created_at   TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_payments_user ON payments (user_id, created_at DESC);
+
+-- v7: Dat cho day du - khu vuc do, ma xac nhan, thoi luong gui du kien, quy tac gia han
+-- Khu vuc (day) cua o do, vd 'A', 'B' (gan mac dinh trong seed.sql / khi admin tao bai)
+ALTER TABLE slots ADD COLUMN IF NOT EXISTS zone VARCHAR(10);
+-- minutes          = tong thoi gian GIU CHO (ke ca gia han)
+-- duration_minutes = thoi luong gui xe du kien sau khi den (de uoc tinh phi)
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS code VARCHAR(12) UNIQUE;          -- ma dat cho, vd DC-7KQ2XA
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS duration_minutes INT CHECK (duration_minutes BETWEEN 30 AND 1440);
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS estimated_fee INT;                 -- VND, theo gia luc dat
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS extend_count INT NOT NULL DEFAULT 0;
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;          -- luc ESP32 xac nhan giu o
+CREATE INDEX IF NOT EXISTS idx_reservations_open ON reservations (status, expires_at) WHERE status IN ('pending', 'active');
