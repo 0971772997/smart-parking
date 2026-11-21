@@ -4,6 +4,7 @@ const { createDb } = require('./db');
 const { createAuth } = require('./auth');
 const { createSync } = require('./sync');
 const { createLiveHub } = require('./live');
+const { createMomoGateway } = require('./paymentGateway');
 const { createMqttBridge } = require('./mqttBridge');
 const { createApp } = require('./app');
 const { createSocialVerifier } = require('./social');
@@ -29,7 +30,9 @@ async function main() {
   const device = createMqttBridge(config.mqtt, sync, { timeoutMs: config.deviceTimeoutMs });
   sync.attachDevice(device);
   const app = createApp({ db, auth: createAuth(config), device, otpDevMode: config.otpDevMode,
-    social: createSocialVerifier(config.social), gatePass: createGatePass(config.jwtSecret), live });
+    social: createSocialVerifier(config.social), gatePass: createGatePass(config.jwtSecret), live,
+    gateway: createMomoGateway(config.payments.momo), publicUrl: config.publicUrl, receiptSecret: config.jwtSecret,
+    allowMockPayments: config.payments.allowMock });
 
   const server = app.listen(config.port, () => console.log(`[API] Dang chay tai cong ${config.port}`));
 

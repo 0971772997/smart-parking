@@ -31,6 +31,19 @@ module.exports = {
     facebookAppId: process.env.FACEBOOK_APP_ID || undefined,
   },
   deviceTimeoutMs: Number(process.env.DEVICE_TIMEOUT_MS) || 8000,
+  // Dia chi cong khai cua API (de MoMo goi IPN / chuyen trinh duyet ve). Render tu cung cap RENDER_EXTERNAL_URL.
+  publicUrl: (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || `http://localhost:${Number(process.env.PORT) || 3000}`).replace(/\/$/, ''),
+  payments: {
+    // Bo trong -> dung khoa THU NGHIEM cong khai cua MoMo (test-payment.momo.vn)
+    momo: {
+      endpoint: process.env.MOMO_ENDPOINT || undefined,
+      partnerCode: process.env.MOMO_PARTNER_CODE || undefined,
+      accessKey: process.env.MOMO_ACCESS_KEY || undefined,
+      secretKey: process.env.MOMO_SECRET_KEY || undefined,
+    },
+    // Thanh toan gia lap tuc thi (khong qua cong): mac dinh tat tren production
+    allowMock: process.env.ALLOW_MOCK_PAYMENTS ? process.env.ALLOW_MOCK_PAYMENTS === 'true' : process.env.NODE_ENV !== 'production',
+  },
   admin: {
     email: process.env.ADMIN_EMAIL,
     password: process.env.ADMIN_PASSWORD,

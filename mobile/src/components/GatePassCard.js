@@ -1,6 +1,6 @@
 // THE MA QR QUA CONG (tai xe): hien ma de nhan vien quet tai cong VAO / RA.
 // - Ma ngan han (mac dinh 120s), tu xin ma moi truoc khi het han -> anh chup man hinh cu khong dung lai duoc.
-// - Cong ra: bao truoc neu xe chua roi o / chua thanh toan, cho thanh toan ngay trong the.
+// - Cong ra: bao truoc neu xe chua roi o / chua thanh toan -> nut sang man Thanh toan (cong MoMo thu nghiem).
 // props: { resv, onChanged } - onChanged(): yeu cau man cha tai lai dat cho (sau thanh toan / khi ma bao loi)
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -9,7 +9,7 @@ import QRCode from 'react-native-qrcode-svg';
 import Button from './Button';
 import Notice from './Notice';
 import { reservationsApi } from '../api/reservations';
-import { paymentsApi } from '../api/gates';
+import { navigate } from '../navigation/ref';
 import { colors, radius } from '../theme';
 import { formatCountdown } from '../utils/booking';
 import { formatVND } from '../utils/schedules';
@@ -21,13 +21,6 @@ const GATE = {
     hint: 'Khi ra bãi, đưa mã này cho nhân viên quét tại cổng ra.' },
 };
 
-const PAY_METHODS = [
-  { key: 'momo', label: 'MoMo' },
-  { key: 'zalopay', label: 'ZaloPay' },
-  { key: 'card', label: 'Thẻ' },
-  { key: 'bank', label: 'Chuyển khoản' },
-];
-
 const BLOCK_POLL_MS = 10000;
 
 export default function GatePassCard({ resv, onChanged }) {
@@ -35,9 +28,6 @@ export default function GatePassCard({ resv, onChanged }) {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  const [method, setMethod] = useState('momo');
-  const [paying, setPaying] = useState(false);
-  const [paidMsg, setPaidMsg] = useState(null);
   const busy = useRef(false);
 
   const fetchPass = useCallback(async () => {
@@ -86,21 +76,6 @@ export default function GatePassCard({ resv, onChanged }) {
     const t = setInterval(fetchPass, BLOCK_POLL_MS);
     return () => clearInterval(t);
   }, [pass?.block, fetchPass]);
-
-  async function pay() {
-    setPaying(true);
-    setPaidMsg(null);
-    try {
-      const p = await paymentsApi.paySession(pass.block.sessionId, method);
-      setPaidMsg(`Đã thanh toán ${formatVND(p.amount)} • Mã GD ${p.code}`);
-      await fetchPass();
-    } catch (e) {
-      if (e.code === 'already_paid') await fetchPass();
-      else setError(e.message);
-    } finally {
-      setPaying(false);
-    }
-  }
 
   const gate = GATE[pass?.gate || resv.nextGate] || GATE.entry;
 
@@ -152,19 +127,10 @@ export default function GatePassCard({ resv, onChanged }) {
             <Text style={styles.payFee}>{formatVND(pass.block.fee)}</Text>
           </View>
           <Text style={styles.payHint}>Thanh toán trước để barie cổng ra tự mở khi quét mã (hoặc trả tiền mặt cho nhân viên).</Text>
-          <View style={styles.methods}>
-            {PAY_METHODS.map((m) => (
-              <Pressable key={m.key} onPress={() => setMethod(m.key)}
-                style={[styles.method, method === m.key && styles.methodOn]} accessibilityState={{ selected: method === m.key }}>
-                <Text style={[styles.methodText, method === m.key && styles.methodTextOn]}>{m.label}</Text>
-              </Pressable>
-            ))}
-          </View>
-          <Button title={`Thanh toán ${formatVND(pass.block.fee)}`} onPress={pay} loading={paying} />
+          <Button title={`Thanh toán ${formatVND(pass.block.fee)} qua MoMo`}
+            onPress={() => navigate('Payment', { sessionId: pass.block.sessionId })} />
         </View>
       )}
-
-      {paidMsg ? <Notice type="success">{paidMsg}</Notice> : null}
     </View>
   );
 }
@@ -185,9 +151,4 @@ const styles = StyleSheet.create({
   payTitle: { flex: 1, fontSize: 13.5, fontWeight: '800', color: colors.danger },
   payFee: { fontSize: 16, fontWeight: '900', color: colors.danger },
   payHint: { fontSize: 12, color: '#7F1D1D' },
-  methods: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  method: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.pill, borderWidth: 1, borderColor: '#FECACA', backgroundColor: '#fff' },
-  methodOn: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
-  methodText: { fontSize: 12.5, fontWeight: '700', color: colors.textMuted },
-  methodTextOn: { color: colors.primary },
 });

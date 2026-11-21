@@ -3,12 +3,14 @@ const cors = require('cors');
 const { HttpError } = require('./errors');
 const { createGatePass } = require('./gatePass');
 const { createLiveHub } = require('./live');
+const { createMomoGateway } = require('./paymentGateway');
 
 // Thao tac lam thay doi bai do / dat cho / phien gui xe -> bao app dang cho cap nhat (long-poll)
 const LIVE_PATHS = /^\/api\/(lots|reservations|gates|sessions|payments)\b/;
 
 function createApp({ db, auth, device, otpDevMode = true, social, gatePass = createGatePass('dev-qr-secret'),
-  live = createLiveHub() }) {
+  live = createLiveHub(), gateway = createMomoGateway(), publicUrl = 'http://localhost:3000', receiptSecret = 'dev-receipt-secret',
+  allowMockPayments = true }) {
   const app = express();
   app.disable('x-powered-by');
   app.use(cors());
@@ -31,7 +33,9 @@ function createApp({ db, auth, device, otpDevMode = true, social, gatePass = cre
   app.use('/api/schedules', require('./routes/schedules')({ db, auth }));
   app.use('/api', require('./routes/live')({ db, live }));
   app.use('/api', require('./routes/sessions')({ db, auth }));
-  app.use('/api', require('./routes/payments')({ db, auth }));
+  app.use('/api', require('./routes/payments')({
+    db, auth, gateway, publicUrl, receiptSecret, allowMock: allowMockPayments, live,
+  }));
 
   app.use((_req, _res, next) => next(new HttpError(404, 'not_found', 'Khong tim thay API')));
 
@@ -39,7 +43,7 @@ function createApp({ db, auth, device, otpDevMode = true, social, gatePass = cre
   app.use((err, _req, res, _next) => {
     if (err.type === 'entity.parse.failed') err = new HttpError(400, 'invalid_json', 'Body khong phai JSON hop le');
     const status = err.status || 500;
-    if (status >= 500 && status !== 503 && status !== 504) console.error('[API] loi:', err);
+    if (status >= 500 && ![502, 503, 504].includes(status)) console.error('[API] loi:', err);
     res.status(status).json({
       error: err.code || 'internal_error',
       message: status === 500 ? 'Loi may chu' : err.message,

@@ -535,6 +535,7 @@ export default function HomeScreen({ navigation }) {
                       setShowEditProfileModal(true);
                     }}
                     onLogout={handleLogout}
+                    onTransactions={() => navigation.navigate('Transactions')}
                   />
                 )}
               </>
@@ -1126,7 +1127,7 @@ function VehiclesTabSection({ vehicles, onOpenAdd, onDelete }) {
 }
 
 /** Tab 4: Hồ sơ & Cài đặt (Hỗ trợ cập nhật hồ sơ) */
-function AccountTabSection({ user, onOpenEdit, onLogout }) {
+function AccountTabSection({ user, onOpenEdit, onLogout, onTransactions }) {
   return (
     <View style={styles.sectionWrap}>
       <View style={styles.profileBox}>
@@ -1160,6 +1161,19 @@ function AccountTabSection({ user, onOpenEdit, onLogout }) {
           <ProfileField icon="logo-facebook" label="Facebook" value="Đã liên kết" valueColor="#10B981" />
         )}
       </View>
+
+      <Pressable
+        onPress={onTransactions}
+        style={({ pressed }) => [styles.detailsCard, styles.txRow, pressed && styles.btnPressed]}
+        accessibilityRole="button"
+      >
+        <Ionicons name="receipt-outline" size={18} color={colors.primary} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.txTitle}>Lịch sử giao dịch & biên nhận</Text>
+          <Text style={styles.txSub}>Các lần thanh toán phí gửi xe, biên nhận điện tử</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+      </Pressable>
 
       <Pressable
         onPress={onLogout}
@@ -1269,6 +1283,9 @@ const styles = StyleSheet.create({
   dotGreen: { backgroundColor: '#10B981' },
   dotGray: { backgroundColor: '#94A3B8' },
   statusPillText: { fontSize: 11, color: colors.textMuted, fontWeight: '600' },
+  txRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  txTitle: { fontSize: 14, fontWeight: '800', color: colors.text },
+  txSub: { fontSize: 12, color: colors.textMuted, marginTop: 1 },
   bellBadge: {
     position: 'absolute', top: -3, right: -3, minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 3,
     backgroundColor: '#DC2626', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: '#fff',

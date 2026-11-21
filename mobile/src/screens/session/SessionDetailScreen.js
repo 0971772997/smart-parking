@@ -310,6 +310,18 @@ export default function SessionDetailScreen({ navigation, route }) {
             {s.payment ? (
               <Info icon="checkmark-done-outline" label="Thanh toán" value={`${formatVND(s.payment.amount)} • ${s.payment.code}`} />
             ) : null}
+            {s.canPay && s.amountDue > 0 ? (
+              <Pressable onPress={() => navigation.navigate('Payment', { sessionId: s.id })} style={styles.payBtn} accessibilityRole="button">
+                <Ionicons name="wallet" size={17} color="#fff" />
+                <Text style={styles.payBtnText}>Thanh toán {formatVND(s.amountDue)} qua MoMo</Text>
+              </Pressable>
+            ) : null}
+            {s.payment ? (
+              <Pressable onPress={() => navigation.navigate('Receipt', { paymentId: s.payment.id })} style={styles.receiptBtn} accessibilityRole="button">
+                <Ionicons name="receipt-outline" size={16} color={colors.primary} />
+                <Text style={styles.receiptBtnText}>Xem biên nhận điện tử</Text>
+              </Pressable>
+            ) : null}
           </View>
 
           {/* MA QR CONG RA + THANH TOAN */}
@@ -439,5 +451,9 @@ const styles = StyleSheet.create({
   stepTime: { fontSize: 11.5, color: '#94A3B8', marginTop: 2 },
 
   link: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12 },
+  payBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 46, borderRadius: radius.md, backgroundColor: '#A50064', marginTop: 10 },
+  payBtnText: { color: '#fff', fontWeight: '800', fontSize: 14.5 },
+  receiptBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 42, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.primary, marginTop: 10 },
+  receiptBtnText: { color: colors.primary, fontWeight: '800', fontSize: 13.5 },
   linkText: { color: colors.primary, fontWeight: '700', fontSize: 13.5 },
 });

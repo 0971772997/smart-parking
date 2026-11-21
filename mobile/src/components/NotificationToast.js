@@ -12,7 +12,9 @@ import { colors, radius } from '../theme';
 const SHOW_MS = 6000;
 
 export function openNotification(n) {
-  if (n.sessionId) navigate('SessionDetail', { id: n.sessionId });
+  if (n.type === 'paid' && n.data?.paymentId) navigate('Receipt', { paymentId: n.data.paymentId });
+  else if (n.type === 'payment_failed' && n.sessionId) navigate('Payment', { sessionId: n.sessionId });
+  else if (n.sessionId) navigate('SessionDetail', { id: n.sessionId });
   else if (n.reservationId) navigate('ReservationDetail', { id: n.reservationId });
 }
 

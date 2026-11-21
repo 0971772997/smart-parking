@@ -22,6 +22,7 @@ export const NOTE_TYPE = {
   extended: { icon: 'add-circle', color: colors.primary },
   left_slot: { icon: 'receipt', color: '#7C3AED' },
   paid: { icon: 'checkmark-circle', color: colors.success },
+  payment_failed: { icon: 'close-circle', color: colors.danger },
   exited: { icon: 'flag', color: '#64748B' },
   reservation_expired: { icon: 'time', color: colors.danger },
 };

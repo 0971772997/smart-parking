@@ -117,6 +117,13 @@ Có thể thử API bằng tay qua file `api.http` (extension **REST Client** tr
 - **Hết hạn**: ESP32 tự trả ô và gửi `reservation_expired`; ngoài ra server tự đánh dấu `expired` khi quá giờ + 60 giây (kiểm tra "lười" mỗi khi đọc/đặt chỗ, không chạy định kỳ để Neon được ngủ). `pending` treo > 60 giây → `failed`.
 - **Không đến**: mỗi lượt `expired` = 1 lần không đến; **3 lần trong 7 ngày → khoá đặt chỗ 24 giờ** (403 `booking_suspended`).
 
+### Thanh toán (`src/paymentGateway.js`, `src/payments.js`, `routes/payments.js`)
+- Cổng **MoMo – môi trường thử nghiệm** (`test-payment.momo.vn`, khoá test công khai của MoMo, không trừ tiền thật). Phương thức: ví MoMo (`captureWallet`), thẻ ATM nội địa (`payWithATM`), Visa/Master (`payWithCC`).
+- Luồng: `POST /api/sessions/:id/checkout {method}` → `payUrl` (trang MoMo) → MoMo gọi `POST /api/payments/momo/ipn` + chuyển trình duyệt về `GET /api/payments/momo/return` (đều **kiểm tra chữ ký HMAC-SHA256**) → tạo giao dịch + **biên nhận điện tử** `BLyyyymmdd-000123` (lưu chi tiết phí tại thời điểm trả). Dự phòng khi IPN không tới (chạy trên máy cá nhân): app hỏi `GET /api/payments/orders/:orderId`, server tự tra cứu MoMo.
+- Thẻ ATM test (tài liệu MoMo): ngân hàng NCB, `9704 0000 0000 0018`, NGUYEN VAN A, 03/07, OTP `OTP`.
+- Biên nhận in được / chia sẻ: `GET /api/receipts/:receiptNo?t=<chữ ký>`. Lịch sử: `GET /api/payments`.
+- Biến môi trường (tuỳ chọn): `MOMO_ENDPOINT`, `MOMO_PARTNER_CODE`, `MOMO_ACCESS_KEY`, `MOMO_SECRET_KEY` (khoá thật), `PUBLIC_URL` (mặc định `RENDER_EXTERNAL_URL` do Render cấp), `ALLOW_MOCK_PAYMENTS` (thanh toán giả lập tức thì – mặc định tắt trên production).
+
 ## 3. Chạy và test trên máy
 
 ```bash

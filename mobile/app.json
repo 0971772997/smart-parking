@@ -40,7 +40,8 @@
           "cameraPermission": "SmartPark cần dùng camera để quét mã QR đặt chỗ tại cổng bãi đỗ.",
           "recordAudioAndroid": false
         }
-      ]
+      ],
+      "expo-web-browser"
     ]
   }
 }

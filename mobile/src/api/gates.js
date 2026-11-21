@@ -8,12 +8,5 @@ export const gatesApi = {
   scans: (lotId, limit = 20, opts) => request(`/gates/scans?lotId=${encodeURIComponent(lotId)}&limit=${limit}`, opts),
 };
 
-export const paymentsApi = {
-  /** Tai xe thanh toan luot do da ket thuc (cong thanh toan gia lap). method: card | momo | zalopay | bank */
-  paySession: (sessionId, method, opts) =>
-    request(`/sessions/${sessionId}/pay`, { method: 'POST', body: { method }, ...opts }),
-
-  /** Nhan vien thu tien tai cong (mac dinh tien mat) */
-  collect: (lotId, sessionId, method = 'cash', opts) =>
-    request(`/lots/${lotId}/sessions/${sessionId}/pay`, { method: 'POST', body: { method }, ...opts }),
-};
+// Giu duong dan import cu
+export { paymentsApi } from './payments';

@@ -224,3 +224,42 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (user_id, id DESC);
+
+-- v10: Cong thanh toan (MoMo moi truong THU NGHIEM) + bien nhan dien tu
+--   payment_orders: don thanh toan gui sang cong (cho tai xe thanh toan tren trang MoMo)
+--   payments      : giao dich THANH CONG (1 phien chi 1 giao dich) + so bien nhan + chi tiet phi luc thanh toan
+ALTER TABLE payments DROP CONSTRAINT IF EXISTS payments_method_check;
+ALTER TABLE payments ADD CONSTRAINT payments_method_check
+  CHECK (method IN ('cash', 'card', 'momo', 'zalopay', 'bank', 'atm'));
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS provider VARCHAR(10) NOT NULL DEFAULT 'mock'; -- momo | cash | mock (gia lap)
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS order_id VARCHAR(50);                       -- ma don gui sang cong
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS gateway_trans_id VARCHAR(40);               -- ma giao dich phia MoMo
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS receipt_no VARCHAR(24) UNIQUE;              -- so bien nhan, vd BL20261121-000012
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS breakdown JSONB;                            -- chi tiet phi (chot luc thanh toan)
+UPDATE payments SET provider = 'cash' WHERE method = 'cash' AND provider = 'mock';
+UPDATE payments SET receipt_no = 'BL' || to_char(created_at AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYYMMDD') || '-' || lpad(id::text, 6, '0')
+WHERE receipt_no IS NULL;
+
+CREATE TABLE IF NOT EXISTS payment_orders (
+  id           SERIAL PRIMARY KEY,
+  order_id     VARCHAR(50) NOT NULL UNIQUE,
+  request_id   VARCHAR(50) NOT NULL,
+  session_id   INT NOT NULL REFERENCES parking_sessions(id) ON DELETE CASCADE,
+  user_id      INT REFERENCES users(id) ON DELETE SET NULL,
+  provider     VARCHAR(10) NOT NULL,                     -- momo
+  method       VARCHAR(10) NOT NULL,                     -- momo (vi) | atm (the noi dia) | card (Visa/Master)
+  amount       INT NOT NULL CHECK (amount > 0),
+  status       VARCHAR(10) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'failed', 'expired')),
+  result_code  INT,
+  message      TEXT,
+  trans_id     VARCHAR(40),
+  pay_type     VARCHAR(20),
+  pay_url      TEXT,
+  deeplink     TEXT,
+  qr_code_url  TEXT,
+  payment_id   INT REFERENCES payments(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at   TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_payment_orders_session ON payment_orders (session_id, created_at DESC);
