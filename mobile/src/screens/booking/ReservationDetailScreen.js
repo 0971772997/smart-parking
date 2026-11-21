@@ -1,4 +1,5 @@
-// CHI TIET DAT CHO: ma xac nhan, dem nguoc giu cho, tien trinh (tao -> xac nhan -> xe vao / huy / het han)
+// CHI TIET DAT CHO: ma xac nhan, dem nguoc giu cho, tien trinh (tao -> xac nhan -> qua cong -> xe vao / huy / het han -> ra bai)
+// Ma QR qua cong VAO / RA (GatePassCard) hien khi dat cho con dung duoc o cong (resv.nextGate).
 // Gia han (toi da theo quy tac), huy (xac nhan truoc), chi duong.
 // params: { id, initial?, justCreated? }
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -10,6 +11,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import Button from '../../components/Button';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import Notice from '../../components/Notice';
+import GatePassCard from '../../components/GatePassCard';
 import { reservationsApi } from '../../api/reservations';
 import { colors, radius } from '../../theme';
 import { formatDuration, formatVND } from '../../utils/schedules';
@@ -34,13 +36,20 @@ export default function ReservationDetailScreen({ navigation, route }) {
   const [cancelling, setCancelling] = useState(false);
   const statusRef = useRef(resv?.status);
   useEffect(() => { statusRef.current = resv?.status; }, [resv?.status]);
+  const gateRef = useRef({ enteredAt: resv?.enteredAt, exitedAt: resv?.exitedAt });
+  useEffect(() => { gateRef.current = { enteredAt: resv?.enteredAt, exitedAt: resv?.exitedAt }; }, [resv?.enteredAt, resv?.exitedAt]);
 
   const load = useCallback(async () => {
     try {
       const r = await reservationsApi.detail(id);
       // Trang thai doi khi dang xem (xe vao / het han) -> bao nguoi dung
       const prev = statusRef.current;
-      if (prev && prev !== r.status && r.status === 'fulfilled') {
+      const g = gateRef.current;
+      if (prev && !g.exitedAt && r.exitedAt) {
+        setNotice({ type: 'success', text: 'Đã xác nhận xe ra bãi. Cảm ơn bạn đã sử dụng SmartPark!' });
+      } else if (prev && !g.enteredAt && r.enteredAt) {
+        setNotice({ type: 'success', text: `Barie đã mở – xe đã qua cổng vào. Mời đến khu ${r.zone || '—'}, ô #${r.slotNumber}.` });
+      } else if (prev && prev !== r.status && r.status === 'fulfilled') {
         setNotice({ type: 'success', text: 'Xe đã vào đúng ô. Lượt đặt chỗ hoàn tất, bắt đầu tính phí gửi xe.' });
       } else if (prev && prev !== r.status && r.status === 'expired') {
         setNotice({ type: 'error', text: 'Đã quá giờ giữ chỗ nên ô được trả lại.' });
@@ -59,14 +68,15 @@ export default function ReservationDetailScreen({ navigation, route }) {
     reservationsApi.rules().then((r) => setRules({ ...DEFAULT_RULES, ...r })).catch(() => {});
   }, [load]);
 
-  // Dang giu cho: lam moi tu may chu 10s/lan, dong ho dem nguoc 1s/lan
+  // Dang giu cho / con ma qua cong: lam moi tu may chu 10s/lan, dong ho dem nguoc 1s/lan
   const open = isOpen(resv);
+  const atGate = !!resv?.nextGate;
   useFocusEffect(useCallback(() => {
-    if (!open) return undefined;
+    if (!open && !atGate) return undefined;
     const poll = setInterval(load, POLL_MS);
     const tick = setInterval(() => setNow(Date.now()), 1000);
     return () => { clearInterval(poll); clearInterval(tick); };
-  }, [open, load]));
+  }, [open, atGate, load]));
 
   // Het gio tren dong ho -> hoi lai may chu (server tu danh dau het han sau thoi gian du phong)
   const left = secondsLeft(resv?.expiresAt, now);
@@ -151,12 +161,13 @@ export default function ReservationDetailScreen({ navigation, route }) {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <StatusBar style="dark" />
-      {header}
-      <ScrollView contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} tintColor={colors.primary} onRefresh={() => { setRefreshing(true); load(); }} />}>
-        {notice ? <Notice type={notice.type}>{notice.text}</Notice> : null}
+      <View style={styles.webContainer}>
+        {header}
+        <ScrollView contentContainerStyle={styles.content}
+          refreshControl={<RefreshControl refreshing={refreshing} tintColor={colors.primary} onRefresh={() => { setRefreshing(true); load(); }} />}>
+          {notice ? <Notice type={notice.type}>{notice.text}</Notice> : null}
 
-        {/* VE */}
+          {/* VE */}
         <View style={styles.ticket}>
           <View style={[styles.badge, { backgroundColor: cfg.bg }]}>
             <Ionicons name={cfg.icon} size={14} color={cfg.color} />
@@ -165,7 +176,9 @@ export default function ReservationDetailScreen({ navigation, route }) {
 
           <Text style={styles.codeLabel}>MÃ ĐẶT CHỖ</Text>
           <Text style={styles.code} selectable>{resv.code || `#${resv.id}`}</Text>
-          <Text style={styles.codeHint}>Đọc mã này cho nhân viên nếu cần đối chiếu tại cổng.</Text>
+          <Text style={styles.codeHint}>
+            {resv.nextGate ? 'Quét mã QR bên dưới tại cổng. Đọc mã này cho nhân viên nếu cần đối chiếu.' : 'Đọc mã này cho nhân viên nếu cần đối chiếu tại cổng.'}
+          </Text>
 
           {resv.status === 'active' && (
             <View style={styles.countdownBox}>
@@ -190,6 +203,9 @@ export default function ReservationDetailScreen({ navigation, route }) {
           </View>
         </View>
 
+        {/* MA QR QUA CONG */}
+        {resv.nextGate ? <GatePassCard resv={resv} onChanged={load} /> : null}
+
         {/* THONG TIN */}
         <View style={styles.card}>
           <Info icon="time-outline" label="Thời gian giữ chỗ"
@@ -208,8 +224,11 @@ export default function ReservationDetailScreen({ navigation, route }) {
           <Step done label="Tạo yêu cầu đặt chỗ" time={resv.createdAt} />
           <Step done={!!resv.confirmedAt} failed={resv.status === 'failed'}
             label={resv.status === 'failed' ? 'Thiết bị không xác nhận' : 'Thiết bị xác nhận giữ ô'} time={resv.confirmedAt} />
+          {resv.enteredAt || resv.nextGate === 'entry' ? (
+            <Step done={!!resv.enteredAt} label={resv.enteredAt ? 'Quét mã – barie cổng vào đã mở' : 'Quét mã QR tại cổng vào'} time={resv.enteredAt} />
+          ) : null}
           <Step
-            last
+            last={!(resv.enteredAt || resv.status === 'fulfilled')}
             done={resv.status === 'fulfilled'}
             failed={['cancelled', 'expired'].includes(resv.status)}
             label={{
@@ -217,8 +236,12 @@ export default function ReservationDetailScreen({ navigation, route }) {
               cancelled: 'Đã huỷ đặt chỗ',
               expired: 'Hết giờ giữ chỗ (không đến)',
             }[resv.status] || 'Chờ xe vào đúng ô'}
-            time={ended && resv.status !== 'failed' ? resv.updatedAt : null}
+            time={ended && resv.status !== 'failed' && resv.status !== 'fulfilled' ? resv.updatedAt : null}
           />
+          {resv.enteredAt || resv.status === 'fulfilled' ? (
+            <Step last done={!!resv.exitedAt}
+              label={resv.exitedAt ? 'Quét mã – đã ra bãi' : 'Thanh toán & quét mã QR tại cổng ra'} time={resv.exitedAt} />
+          ) : null}
         </View>
 
         {/* THAO TAC */}
@@ -259,17 +282,18 @@ export default function ReservationDetailScreen({ navigation, route }) {
         {open && <RulesBox rules={rules} />}
       </ScrollView>
 
-      <ConfirmDialog
-        visible={confirmCancel}
-        danger
-        title="Huỷ đặt chỗ?"
-        message={`Ô #${resv.slotNumber} (khu ${resv.zone}) sẽ được trả lại cho bãi. Huỷ miễn phí và không tính là không đến.`}
-        confirmLabel="Huỷ đặt chỗ"
-        cancelLabel="Giữ lại"
-        loading={cancelling}
-        onConfirm={cancel}
-        onCancel={() => setConfirmCancel(false)}
-      />
+        <ConfirmDialog
+          visible={confirmCancel}
+          danger
+          title="Huỷ đặt chỗ?"
+          message={`Ô #${resv.slotNumber} (khu ${resv.zone}) sẽ được trả lại cho bãi. Huỷ miễn phí và không tính là không đến.`}
+          confirmLabel="Huỷ đặt chỗ"
+          cancelLabel="Giữ lại"
+          loading={cancelling}
+          onConfirm={cancel}
+          onCancel={() => setConfirmCancel(false)}
+        />
+      </View>
     </SafeAreaView>
   );
 }
@@ -310,7 +334,20 @@ function Step({ label, time, done, failed, last }) {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#FFFFFF' },
+  safe: { flex: 1, backgroundColor: '#F1F5F9' },
+  webContainer: {
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    ...(Platform.OS === 'web'
+      ? {
+          boxShadow: '0 4px 24px rgba(0,0,0,0.06)',
+          minHeight: '100vh',
+        }
+      : {}),
+  },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16 },
   content: { padding: 16, paddingBottom: 40, backgroundColor: '#F8FAFC', flexGrow: 1 },
   muted: { fontSize: 13, color: colors.textMuted },

@@ -6,6 +6,7 @@
 //   active   --(xe vao dung o)-->  fulfilled  (mo luot do, tinh phi tu luc xe vao)
 //   active   --(nguoi dung huy)-->  cancelled  (mien phi, khong tinh vi pham)
 //   active   --(het gio giu cho ma xe chua den)-->  expired  (= "khong den", tinh 1 lan vi pham)
+//   Qua cong bang ma QR (src/gatePass.js): entered_at / exited_at. Da qua cong vao thi khong bi tinh "khong den".
 const crypto = require('crypto');
 
 const RULES = {
@@ -16,6 +17,8 @@ const RULES = {
   graceSeconds: 60,          // qua gio giu cho them 60s (cho do tre MQTT) server moi tu danh dau het han
   pendingTimeoutSeconds: 60, // 'pending' qua 60s (server loi giua chung) -> failed
   noShow: { limit: 3, windowDays: 7, suspendHours: 24 },   // 3 lan khong den trong 7 ngay -> khoa dat cho 24 gio
+  // Ma QR qua cong: song 120s (app tu lam moi), ma ra bai dung duoc trong 48 gio ke tu luc dat
+  gate: { qrTtlSeconds: 120, refreshBeforeSeconds: 20, exitWithinHours: 48 },
 };
 
 // Ma dat cho de doi chieu tai cong, vd DC-7KQ2XA (bo 0/O/1/I de de doc)
@@ -35,7 +38,7 @@ const estimateFee = (pricePerHour, durationMinutes) =>
 async function expireStale(db) {
   const { rows } = await db.query(
     `UPDATE reservations SET status = 'expired', error = COALESCE(error, 'no_show'), updated_at = now()
-     WHERE status = 'active' AND expires_at < now() - make_interval(secs => $1)
+     WHERE status = 'active' AND entered_at IS NULL AND expires_at < now() - make_interval(secs => $1)
      RETURNING slot_id`, [RULES.graceSeconds]);
   if (rows.length) {
     await db.query(`UPDATE slots SET state = 'free', updated_at = now() WHERE id = ANY($1) AND state = 'reserved'`,

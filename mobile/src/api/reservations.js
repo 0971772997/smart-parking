@@ -23,6 +23,9 @@ export const reservationsApi = {
   /** Huy dat cho */
   cancel: (id, opts) => request(`/reservations/${id}`, { method: 'DELETE', ...opts }),
 
+  /** Ma QR qua cong (vao / ra) - ngan han, goi lai truoc khi het han */
+  pass: (id, opts) => request(`/reservations/${id}/pass`, opts),
+
   /** Gia han dat cho */
   extend: (id, minutes, opts) =>
     request(`/reservations/${id}/extend`, { method: 'POST', body: { minutes }, ...opts }),

@@ -3,6 +3,8 @@
 // - Ca 'status' (dinh ky 10s) va 'event' deu di qua applySlotState, nen neu server lo mat
 //   su kien (vd Render free dang ngu) thi status tiep theo van sua lai dung du lieu.
 
+const { confirmScan } = require('./gatePass');
+
 // Neon free tu "ngu" sau 5 phut khong truy van -> chi cap nhat last_seen 30 phut/lan
 // (trang thai online/offline that da co topic 'online' + LWT lo).
 const LAST_SEEN_WRITE_MS = 30 * 60 * 1000;
@@ -47,7 +49,7 @@ async function applySlotState(q, lotId, slotNumber, newState, distance) {
     // Thiet bi da bo giu cho (het han / huy tai cho) -> dong bo dat cho
     await q.query(
       `UPDATE reservations SET status = 'expired', updated_at = now()
-       WHERE slot_id = $1 AND status = 'active' AND expires_at <= now() + interval '5 seconds'`, [cur.id]);
+       WHERE slot_id = $1 AND status = 'active' AND entered_at IS NULL AND expires_at <= now() + interval '5 seconds'`, [cur.id]);
   }
   return true;
 }
@@ -108,7 +110,8 @@ function createSync(db) {
     } else if (ev.type === 'reservation_expired') {
       await db.query(
         `UPDATE reservations r SET status = 'expired', updated_at = now()
-         FROM slots s WHERE s.id = r.slot_id AND s.lot_id = $1 AND s.slot_number = $2 AND r.status = 'active'`,
+         FROM slots s WHERE s.id = r.slot_id AND s.lot_id = $1 AND s.slot_number = $2 AND r.status = 'active'
+           AND r.entered_at IS NULL`,
         [lotId, ev.slot]);
       await db.query(`UPDATE slots SET state = 'free', updated_at = now()
                       WHERE lot_id = $1 AND slot_number = $2 AND state = 'reserved'`, [lotId, ev.slot]);
@@ -117,6 +120,9 @@ function createSync(db) {
       const col = ev.gate === 'exit' ? 'exit_gate' : 'entry_gate';
       await db.query(`UPDATE parking_lots SET ${col} = $2 WHERE id = $1`, [lotId, ev.state]);
       c.gates[ev.gate] = ev.state;
+    } else if (ev.type === 'ack' && ev.action === 'open_gate' && ev.ok && ev.requestId) {
+      // Ack mo barie cho 1 lan quet QR (ca khi den tre, sau khi API da bao device_timeout) -> xac nhan xe vao/ra
+      await confirmScan(db, ev.requestId);
     }
   }
 

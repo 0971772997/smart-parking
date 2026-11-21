@@ -39,6 +39,23 @@ const MESSAGES = {
   not_reserved: 'Thiết bị không còn giữ ô này.',
   device_offline: 'Thiết bị bãi đỗ đang mất kết nối.',
   device_timeout: 'Thiết bị bãi đỗ không phản hồi. Vui lòng thử lại.',
+  // Ma QR qua cong
+  qr_invalid: 'Mã QR không hợp lệ (không phải mã của SmartPark hoặc đã bị chỉnh sửa).',
+  qr_expired: 'Mã QR đã hết hạn. Tài xế cần mở lại mã mới trên app.',
+  wrong_lot: 'Mã QR thuộc bãi đỗ khác.',
+  wrong_gate: 'Mã QR không đúng cổng (mã vào dùng ở cổng vào, mã ra dùng ở cổng ra).',
+  already_entered: 'Xe đã qua cổng vào bằng lượt đặt chỗ này.',
+  already_exited: 'Xe đã ra bãi bằng lượt đặt chỗ này.',
+  not_entered: 'Xe chưa qua cổng vào.',
+  pass_expired: 'Mã ra bãi đã quá thời hạn sử dụng.',
+  still_parked: 'Xe vẫn đang ở trong ô đỗ (cảm biến chưa ghi nhận xe rời ô).',
+  payment_required: 'Chưa thanh toán phí gửi xe.',
+  scan_in_progress: 'Mã này đang được xử lý ở một lần quét khác.',
+  session_not_found: 'Không tìm thấy lượt đỗ.',
+  session_not_ended: 'Xe chưa rời bãi, chưa thanh toán được.',
+  already_paid: 'Lượt đỗ này đã được thanh toán.',
+  invalid_gate: 'Cổng không hợp lệ.',
+  forbidden: 'Chỉ nhân viên / quản trị viên được dùng chức năng này.',
   internal_error: 'Máy chủ gặp sự cố. Vui lòng thử lại sau.',
 };
 

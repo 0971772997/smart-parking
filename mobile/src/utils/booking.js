@@ -60,4 +60,5 @@ export const FAIL_REASONS = {
   slot_not_free: 'Ô đã có xe hoặc đã được giữ',
   pending_timeout: 'Không nhận được xác nhận từ thiết bị',
   no_show: 'Quá giờ giữ chỗ nhưng xe chưa đến',
+  left_without_parking: 'Xe đã ra bãi trước khi đỗ vào ô',
 };

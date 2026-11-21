@@ -160,3 +160,26 @@ ALTER TABLE reservations ADD COLUMN IF NOT EXISTS estimated_fee INT;            
 ALTER TABLE reservations ADD COLUMN IF NOT EXISTS extend_count INT NOT NULL DEFAULT 0;
 ALTER TABLE reservations ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;          -- luc ESP32 xac nhan giu o
 CREATE INDEX IF NOT EXISTS idx_reservations_open ON reservations (status, expires_at) WHERE status IN ('pending', 'active');
+
+-- v8: Ma QR qua cong (vao / ra bai) cho luot dat cho
+-- entered_at / exited_at = luc barie mo THAT (ESP32 tra ack ok) sau khi quet ma hop le
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS entered_at TIMESTAMPTZ;
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS exited_at TIMESTAMPTZ;
+-- Nhat ky MOI lan quet ma tai cong (ke ca ma loi) de doi chieu / xu ly su co
+CREATE TABLE IF NOT EXISTS gate_scans (
+  id             SERIAL PRIMARY KEY,
+  lot_id         VARCHAR(50) NOT NULL REFERENCES parking_lots(id) ON DELETE CASCADE,
+  gate           VARCHAR(5)  NOT NULL CHECK (gate IN ('entry', 'exit')),
+  reservation_id INT REFERENCES reservations(id) ON DELETE SET NULL,
+  nonce          VARCHAR(16),                       -- ma ngau nhien trong QR (moi ma chi dung 1 lan)
+  result         VARCHAR(10) NOT NULL CHECK (result IN ('pending', 'granted', 'denied')),
+  error          VARCHAR(40),                       -- ly do tu choi (qr_expired, payment_required, device_timeout...)
+  request_id     VARCHAR(40),                       -- ghep voi ack mo barie tu ESP32
+  scanned_by     INT REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  confirmed_at   TIMESTAMPTZ                        -- luc ESP32 xac nhan da mo barie
+);
+CREATE INDEX IF NOT EXISTS idx_gate_scans_lot_time ON gate_scans (lot_id, created_at DESC);
+-- Moi dat cho chi vao 1 lan / ra 1 lan (chan quet trung, 2 nguoi quet cung luc)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_gate_scan_once
+  ON gate_scans (reservation_id, gate) WHERE result IN ('pending', 'granted');

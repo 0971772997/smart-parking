@@ -4,10 +4,11 @@ const { wrap, notFound, conflict, HttpError } = require('../errors');
 const v = require('../validate');
 const map = require('../mappers');
 const { RULES, RESERVATION_SELECT: SELECT, expireStale, suspension } = require('../booking');
+const { nextGate, gateBlock, exitBlock } = require('../gatePass');
 
 const STATUSES = ['pending', 'active', 'fulfilled', 'cancelled', 'expired', 'failed'];
 
-module.exports = function reservationRoutes({ db, auth, device }) {
+module.exports = function reservationRoutes({ db, auth, device, gatePass }) {
   const r = express.Router();
   r.use(auth.requireAuth);
 
@@ -48,6 +49,24 @@ module.exports = function reservationRoutes({ db, auth, device }) {
 
   r.get('/:id', wrap(async (req, res) => {
     res.json(map.reservation(await getOwn(req)));
+  }));
+
+  // Ma QR qua cong cho tai xe: tu chon cong tiep theo (vao -> ra). Ma song RULES.gate.qrTtlSeconds, app tu xin lai.
+  // Cong ra: kem canh bao neu xe chua roi o / chua thanh toan (van cap ma, nhung quet se bi tu choi)
+  r.get('/:id/pass', wrap(async (req, res) => {
+    const row = await getOwn(req);
+    const gate = nextGate(row);
+    if (!gate) {
+      const code = gateBlock(row, row.entered_at || row.status === 'fulfilled' ? 'exit' : 'entry');
+      throw conflict(code, 'Dat cho nay khong con dung de qua cong');
+    }
+    const p = gatePass.issue(row.id, gate);
+    const block = gate === 'exit' ? await exitBlock(db, row.id) : null;
+    res.json({
+      reservationId: row.id, code: row.code, lotId: row.lot_id, gate, token: p.token,
+      expiresAt: p.expiresAt, ttlSeconds: p.ttlSeconds, refreshBeforeSeconds: RULES.gate.refreshBeforeSeconds,
+      block: block && { error: block.error, sessionId: block.sessionId, fee: block.fee },
+    });
   }));
 
   // Huy dat cho (mien phi, khong tinh vi pham)

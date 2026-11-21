@@ -45,7 +45,7 @@
 #endif
 #define MQTT_USE_TLS (MQTT_PORT_CFG == 8883)
 
-#define FW_VERSION "1.2.0"
+#define FW_VERSION "1.3.0"
 
 // ================== CAU HINH ==================
 const char* MQTT_HOST = MQTT_HOST_CFG;
@@ -337,8 +337,10 @@ void handleCommand(const char* json, size_t len, const char* source) {
     if (strcmp(gate, "exit") == 0) handleExitRequest("app");
     else if (strcmp(gate, "entry") == 0) {
       // App mo cong vao: cho phep ca khi het cho trong (vd: xe da dat cho)
+      // Quet ma QR dat cho -> may chu gui kem so o -> LCD chi duong cho tai xe
+      int slot = doc["slot"] | 0;
       openGate(gateIn, "app");
-      showMessage("MOI XE VAO BAI!");
+      showMessage(slot > 0 ? "MOI VAO -> O SO " + String(slot) : String("MOI XE VAO BAI!"), 4000);
     } else { ok = false; err = "invalid_gate"; }
     ack["gate"] = gate;
 

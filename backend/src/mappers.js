@@ -1,5 +1,6 @@
 // Chuyen dong DB (snake_case) -> JSON tra ve cho app (camelCase)
 const { RULES } = require('./booking');
+const { nextGate } = require('./gatePass');
 
 const user = (u) => u && ({
   id: u.id, username: u.username, email: u.email, fullName: u.full_name, phone: u.phone, role: u.role, avatarUrl: u.avatar_url,
@@ -32,6 +33,8 @@ const reservation = (r) => {
     status: r.status, minutes: r.minutes, holdMinutes: r.minutes, durationMinutes: r.duration_minutes,
     estimatedFee: r.estimated_fee, extendCount: r.extend_count ?? 0, error: r.error,
     confirmedAt: r.confirmed_at, expiresAt: r.expires_at, createdAt: r.created_at, updatedAt: r.updated_at,
+    enteredAt: r.entered_at ?? null, exitedAt: r.exited_at ?? null,
+    nextGate: nextGate(r), // 'entry' | 'exit' | null -> app hien ma QR qua cong tuong ung
     canCancel: r.status === 'active',
     canExtend: !!live && (r.extend_count ?? 0) < RULES.extend.maxTimes,
   };
@@ -69,4 +72,11 @@ const payment = (p) => p && ({
   startedAt: p.started_at, endedAt: p.ended_at, durationSeconds: p.duration_seconds,
 });
 
-module.exports = { user, vehicle, lot, slot, reservation, session, schedule, mySession, payment };
+// Nhat ky quet ma tai cong
+const gateScan = (g) => g && ({
+  id: g.id, lotId: g.lot_id, gate: g.gate, reservationId: g.reservation_id, result: g.result, error: g.error,
+  reservationCode: g.reservation_code ?? null, slotNumber: g.slot_number ?? null, vehiclePlate: g.vehicle_plate ?? null,
+  scannedBy: g.scanned_by, createdAt: g.created_at, confirmedAt: g.confirmed_at,
+});
+
+module.exports = { gateScan, user, vehicle, lot, slot, reservation, session, schedule, mySession, payment };

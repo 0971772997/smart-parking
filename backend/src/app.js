@@ -1,8 +1,9 @@
 const express = require('express');
 const cors = require('cors');
 const { HttpError } = require('./errors');
+const { createGatePass } = require('./gatePass');
 
-function createApp({ db, auth, device, otpDevMode = true, social }) {
+function createApp({ db, auth, device, otpDevMode = true, social, gatePass = createGatePass('dev-qr-secret') }) {
   const app = express();
   app.disable('x-powered-by');
   app.use(cors());
@@ -16,7 +17,8 @@ function createApp({ db, auth, device, otpDevMode = true, social }) {
   app.use('/api/auth', require('./routes/auth')({ db, auth, otpDevMode, social }));
   app.use('/api/vehicles', require('./routes/vehicles')({ db, auth }));
   app.use('/api/lots', require('./routes/lots')({ db, auth, device }));
-  app.use('/api/reservations', require('./routes/reservations')({ db, auth, device }));
+  app.use('/api/reservations', require('./routes/reservations')({ db, auth, device, gatePass }));
+  app.use('/api/gates', require('./routes/gates')({ db, auth, device, gatePass }));
   app.use('/api/schedules', require('./routes/schedules')({ db, auth }));
   app.use('/api', require('./routes/payments')({ db, auth }));
 
