@@ -32,6 +32,8 @@ export const NOTE_TYPE = {
   support_reply: { icon: 'chatbubbles', color: colors.primary },
   support_status: { icon: 'checkmark-done-circle', color: colors.success },
   review_reply: { icon: 'star', color: '#F59E0B' },
+  announcement: { icon: 'megaphone', color: '#DB2777' },
+  admin_notice: { icon: 'shield-checkmark', color: colors.primary },
 };
 
 export const FLAG_LABEL = {

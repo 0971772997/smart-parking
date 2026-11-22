@@ -64,10 +64,19 @@ module.exports = function sessionRoutes({ db, auth }) {
     if (total > ext.maxTotalMinutes) {
       throw conflict('extend_too_long', `Tong thoi gian gui toi da ${ext.maxTotalMinutes / 60} gio`);
     }
+    // Dieu kien kiem tra lai NGAY TRONG cau UPDATE (nguyen tu): bam gia han nhieu lan cung luc khong vuot gioi han
     const upd = await db.one(
       `UPDATE parking_sessions SET planned_end_at = planned_end_at + make_interval(mins => $2),
-         extend_count = extend_count + 1, updated_at = now() WHERE id = $1 AND ended_at IS NULL RETURNING *`, [s.id, minutes]);
-    if (!upd) throw conflict('session_ended', 'Phien gui xe da ket thuc');
+         extend_count = extend_count + 1, updated_at = now()
+       WHERE id = $1 AND ended_at IS NULL AND exited_at IS NULL AND extend_count < $3
+         AND planned_end_at + make_interval(mins => $2) <= started_at + make_interval(mins => $4)
+       RETURNING *`, [s.id, minutes, ext.maxTimes, ext.maxTotalMinutes]);
+    if (!upd) {
+      const cur = await db.one('SELECT ended_at, exited_at, extend_count FROM parking_sessions WHERE id = $1', [s.id]);
+      if (cur.ended_at || cur.exited_at) throw conflict('session_ended', 'Phien gui xe da ket thuc');
+      if (cur.extend_count >= ext.maxTimes) throw conflict('extend_limit', `Chi duoc gia han toi da ${ext.maxTimes} lan`);
+      throw conflict('extend_too_long', `Tong thoi gian gui toi da ${ext.maxTotalMinutes / 60} gio`);
+    }
     const planned = sessionFee({ startedAt: upd.started_at, endAt: upd.planned_end_at, pricePerHour: s.price_per_hour }).total;
     await notify(db, { userId: s.owner_id, sessionId: s.id, type: 'extended', key: `s${s.id}:ext:${upd.extend_count}`,
       title: `Đã gia hạn thêm ${minutes} phút`,

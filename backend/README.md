@@ -124,6 +124,12 @@ Có thể thử API bằng tay qua file `api.http` (extension **REST Client** tr
 - Biên nhận in được / chia sẻ: `GET /api/receipts/:receiptNo?t=<chữ ký>`. Lịch sử: `GET /api/payments`.
 - Biến môi trường (tuỳ chọn): `MOMO_ENDPOINT`, `MOMO_PARTNER_CODE`, `MOMO_ACCESS_KEY`, `MOMO_SECRET_KEY` (khoá thật), `PUBLIC_URL` (mặc định `RENDER_EXTERNAL_URL` do Render cấp), `ALLOW_MOCK_PAYMENTS` (thanh toán giả lập tức thì – mặc định tắt trên production).
 
+### Trang quản trị (`routes/admin.js`, chỉ tài khoản `admin`)
+- `GET /api/admin/overview?days=7|30` – doanh thu hôm nay, chuỗi doanh thu theo ngày, ô/xe trong bãi, việc cần xử lý (sự cố mở, phiên chưa thanh toán, đánh giá chưa phản hồi), tình trạng từng bãi.
+- Người dùng: `GET /api/admin/users?q=&role=&status=locked`, `GET|PATCH /api/admin/users/:id` (`locked`, `lockedReason`, `role`, `resetNoShows`). Khoá / đổi quyền **có hiệu lực ngay** (middleware kiểm tra tài khoản mỗi request, cache 30s) – không tự khoá / tự hạ quyền mình.
+- Bãi đỗ: `POST /api/lots`, `PUT /api/lots/:id` (tên, địa chỉ, giá, số ô, `bookingEnabled`), `DELETE /api/lots/:id` (chỉ bãi chưa có lịch sử), `GET /api/admin/lots`.
+- `GET /api/admin/reservations`, `POST /api/admin/reservations/:id/cancel`; `GET /api/admin/sessions?state=active|unpaid|completed|all`, `POST /api/admin/sessions/:id/close {note, waive}`; `GET /api/admin/payments` (tổng + theo phương thức); `GET|DELETE /api/admin/reviews`; `POST /api/admin/broadcast {title, body, audience: all|lot:<id>}`; `GET /api/admin/audit` (nhật ký mọi thao tác quản trị).
+
 ### Lịch sử, yêu thích, đánh giá, hỗ trợ (`routes/history.js`, `routes/feedback.js`, `routes/support.js`)
 - **Lịch sử**: `GET /api/history?from=YYYY-MM-DD&to=YYYY-MM-DD&kind=all|sessions|reservations&lotId=` (giờ Việt Nam, mặc định 30 ngày, tối đa 366 ngày) → phiên gửi xe + đặt chỗ không thành phiên (không trùng) + tổng hợp phí / thời gian / huỷ / không đến.
 - **Yêu thích**: `GET /api/favorites`, `PUT|DELETE /api/favorites/:lotId` (tối đa 50).
@@ -136,7 +142,9 @@ Có thể thử API bằng tay qua file `api.http` (extension **REST Client** tr
 npm install
 npm run migrate      # tạo bảng và dữ liệu mẫu (bãi sp-demo-01, 4 ô)
 npm run dev          # http://localhost:3000
-npm test             # 46 test tự động, chạy trên nhánh DB Neon "test" (.env.test), ESP32 được giả lập
+npm test             # 273 test (đơn vị + tích hợp + E2E + bảo mật + tải đồng thời), nhánh DB Neon "test" (.env.test), ESP32 giả lập
+npm run test:unit    # chỉ test đơn vị (không cần DB, vài giây) – xem các lệnh khác + kết quả trong docs/KIEM_THU.md
+npm run perf         # đo hiệu năng (p50/p95/p99, đột biến 50 kết nối, 500 long-poll)
 node scripts/e2e.js http://localhost:3000 <admin-email> <admin-pass>   # test thật với ESP32/Wokwi qua MQTT
 ```
 

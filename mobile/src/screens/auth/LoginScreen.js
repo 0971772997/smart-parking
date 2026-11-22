@@ -48,6 +48,7 @@ export default function LoginScreen({ navigation, route }) {
     const p = route.params;
     if (p?.email) { setEmail(p.email); setPassword(''); }
     if (p?.message) setInfo(p.message);
+    if (p?.notice) setError(p.notice); // bi khoa tai khoan khi dang dung app
   }, [route.params]);
 
   const edit = (setter, key) => (t) => { setter(t); if (errs[key]) setErrs((e) => ({ ...e, [key]: undefined })); };

@@ -1,6 +1,7 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { authApi } from '../api/auth';
-import { setAuthToken } from '../api/client';
+import { setAccountLockedHandler, setAuthToken } from '../api/client';
+import { navigationRef } from '../navigation/ref';
 import { storage } from '../storage';
 import { unregisterPush } from '../notifications';
 
@@ -20,7 +21,7 @@ export function AuthProvider({ children }) {
       setUser(me);
       return me;
     } catch (e) {
-      if (e.status === 401) await storage.clearToken();   // token het han / tai khoan bi xoa
+      if (e.status === 401 || e.code === 'account_locked') await storage.clearToken();   // token het han / tai khoan bi xoa
       setAuthToken(null);
       return null;
     }
@@ -39,6 +40,17 @@ export function AuthProvider({ children }) {
     await storage.clearToken();
     setAuthToken(null);
     setUser(null);
+  }, []);
+
+  // Bi quan tri khoa khi dang dung app -> dang xuat, ve man dang nhap kem ly do
+  useEffect(() => {
+    setAccountLockedHandler(async (message) => {
+      setAuthToken(null);
+      await storage.clearToken();
+      setUser(null);
+      if (navigationRef.isReady()) navigationRef.reset({ index: 0, routes: [{ name: 'Login', params: { notice: message } }] });
+    });
+    return () => setAccountLockedHandler(null);
   }, []);
 
   const updateUser = useCallback((updated) => {

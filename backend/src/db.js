@@ -5,7 +5,8 @@ const { Pool } = require('pg');
 function createDb(databaseUrl) {
   // Neon dung chung chi hop le -> kiem tra day du (verify-full), tranh canh bao cua pg
   const url = databaseUrl.replace(/sslmode=(require|prefer|verify-ca)/, 'sslmode=verify-full');
-  const pool = new Pool({ connectionString: url, max: 5, idleTimeoutMillis: 30000 });
+  // 10 ket noi (Neon pooler cho phep nhieu hon); chinh bang DB_POOL_MAX. Cho ket noi toi da 10s roi bao loi (-> 503)
+  const pool = new Pool({ connectionString: url, max: Number(process.env.DB_POOL_MAX) || 10, idleTimeoutMillis: 30000, connectionTimeoutMillis: 10000 });
   pool.on('error', (err) => console.error('[DB] loi pool:', err.message));
 
   return {

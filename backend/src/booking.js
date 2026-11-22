@@ -60,18 +60,19 @@ async function notifyExpired(q, ids) {
 }
 
 async function expireStale(db) {
+  // 1 luot goi DB (goi o moi lan doc bai / dat cho): het han giu cho + tra o + 'pending' treo -> failed
   const { rows } = await db.query(
-    `UPDATE reservations SET status = 'expired', error = COALESCE(error, 'no_show'), updated_at = now()
-     WHERE status = 'active' AND entered_at IS NULL AND expires_at < now() - make_interval(secs => $1)
-     RETURNING id, slot_id`, [RULES.graceSeconds]);
-  if (rows.length) {
-    await db.query(`UPDATE slots SET state = 'free', updated_at = now() WHERE id = ANY($1) AND state = 'reserved'`,
-      [rows.map((r) => r.slot_id)]);
-    await notifyExpired(db, rows.map((r) => r.id));
-  }
-  await db.query(
-    `UPDATE reservations SET status = 'failed', error = 'pending_timeout', updated_at = now()
-     WHERE status = 'pending' AND created_at < now() - make_interval(secs => $1)`, [RULES.pendingTimeoutSeconds]);
+    `WITH exp AS (
+       UPDATE reservations SET status = 'expired', error = COALESCE(error, 'no_show'), updated_at = now()
+       WHERE status = 'active' AND entered_at IS NULL AND expires_at < now() - make_interval(secs => $1)
+       RETURNING id, slot_id),
+     freed AS (
+       UPDATE slots SET state = 'free', updated_at = now() WHERE id IN (SELECT slot_id FROM exp) AND state = 'reserved'),
+     stuck AS (
+       UPDATE reservations SET status = 'failed', error = 'pending_timeout', updated_at = now()
+       WHERE status = 'pending' AND created_at < now() - make_interval(secs => $2))
+     SELECT id FROM exp`, [RULES.graceSeconds, RULES.pendingTimeoutSeconds]);
+  if (rows.length) await notifyExpired(db, rows.map((r) => r.id));
 }
 
 // Bi khoa dat cho do "khong den" qua nhieu? -> { until, noShows } hoac null
@@ -80,6 +81,7 @@ async function suspension(db, userId) {
   const { rows } = await db.query(
     `SELECT updated_at FROM reservations
      WHERE user_id = $1 AND status = 'expired' AND updated_at > now() - make_interval(days => $2)
+       AND updated_at > COALESCE((SELECT noshow_reset_at FROM users WHERE id = $1), '-infinity')
      ORDER BY updated_at DESC LIMIT $3`, [userId, windowDays, limit]);
   if (rows.length < limit) return { noShows: rows.length, until: null };
   const until = new Date(new Date(rows[0].updated_at).getTime() + suspendHours * 3600 * 1000);

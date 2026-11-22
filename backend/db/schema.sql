@@ -339,3 +339,36 @@ CREATE TABLE IF NOT EXISTS support_messages (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_support_messages_ticket ON support_messages (ticket_id, id);
+
+-- v13: Trang quan tri
+-- Khoa tai khoan (khong dang nhap / goi API duoc) + mo khoa dat cho (bo qua cac lan "khong den" truoc moc nay)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_reason VARCHAR(200);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS noshow_reset_at TIMESTAMPTZ;
+-- Bai tam ngung nhan dat cho (bao tri) - van hien tren app
+ALTER TABLE parking_lots ADD COLUMN IF NOT EXISTS booking_enabled BOOLEAN NOT NULL DEFAULT true;
+-- Ghi chu cua quan tri khi dong phien / mien phi
+ALTER TABLE parking_sessions ADD COLUMN IF NOT EXISTS admin_note VARCHAR(200);
+
+-- Nhat ky thao tac cua quan tri vien (ai, lam gi, luc nao)
+CREATE TABLE IF NOT EXISTS admin_actions (
+  id          BIGSERIAL PRIMARY KEY,
+  admin_id    INT REFERENCES users(id) ON DELETE SET NULL,
+  action      VARCHAR(40) NOT NULL,              -- user.lock, lot.update, session.close, broadcast ...
+  target_type VARCHAR(20),
+  target_id   VARCHAR(60),
+  detail      JSONB NOT NULL DEFAULT '{}',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_admin_actions_time ON admin_actions (id DESC);
+
+-- Thong bao chung gui toi tai xe
+CREATE TABLE IF NOT EXISTS broadcasts (
+  id          SERIAL PRIMARY KEY,
+  title       VARCHAR(120) NOT NULL,
+  body        VARCHAR(500),
+  audience    VARCHAR(20) NOT NULL DEFAULT 'all',  -- all | lot:<lotId> (tai xe tung gui xe / yeu thich bai)
+  recipients  INT NOT NULL DEFAULT 0,
+  created_by  INT REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);

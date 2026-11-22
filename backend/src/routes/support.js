@@ -10,6 +10,7 @@ const express = require('express');
 const { wrap, badRequest, notFound, conflict, HttpError } = require('../errors');
 const v = require('../validate');
 const { notify } = require('../sessions');
+const { audit } = require('../admin');
 const { SUPPORT_CATEGORIES, HIGH_PRIORITY, TICKET_STATUSES, CONTACT, FAQ, ticketCode, displayName } = require('../feedback');
 
 const STATUS_LABEL = { open: 'Đã tiếp nhận', in_progress: 'Đang xử lý', resolved: 'Đã giải quyết', closed: 'Đã đóng' };
@@ -169,6 +170,7 @@ module.exports = function supportRoutes({ db, auth }) {
       `UPDATE support_tickets SET status = $2::varchar, updated_at = now(),
          resolved_at = CASE WHEN $2::varchar IN ('resolved', 'closed') THEN COALESCE(resolved_at, now()) ELSE NULL END WHERE id = $1`,
       [t.id, status]);
+    if (admin) await audit(db, req, 'ticket.status', 'ticket', t.id, { code: t.code, from: t.status, to: status });
     if (admin && t.user_id !== req.user.id) {
       await notify(db, { userId: t.user_id, type: 'support_status', key: `t${t.id}:st:${status}:${Date.now()}`,
         title: `Yêu cầu ${t.code}: ${STATUS_LABEL[status]}`, body: t.subject, data: { ticketId: t.id, status } });

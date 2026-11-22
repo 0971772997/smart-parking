@@ -14,6 +14,7 @@ const crypto = require('crypto');
 const express = require('express');
 const { wrap, badRequest, notFound, conflict, HttpError } = require('../errors');
 const v = require('../validate');
+const { audit } = require('../admin');
 const { SESSION_SELECT, closeSession } = require('../sessions');
 const {
   PAYMENT_SELECT, recordPayment, settleOrder, paymentView, orderView, receiptToken, receiptHtml,
@@ -205,9 +206,11 @@ module.exports = function paymentRoutes({ db, auth, gateway, publicUrl, receiptS
     const method = parseMethod({ method: 'cash', ...req.body }, ADMIN_METHODS);
     const s = await db.one(`${SESSION_SELECT} WHERE ps.id = $1 AND s.lot_id = $2`, [id, req.params.lotId]);
     if (!s) throw notFound('session_not_found', 'Khong tim thay luot do');
-    res.status(201).json(view(await recordPayment(db, s, {
+    const p = await recordPayment(db, s, {
       userId: s.owner_id || null, method, provider: method === 'cash' ? 'cash' : 'mock', collectedBy: req.user.id,
-    })));
+    });
+    await audit(db, req, 'session.collect', 'session', s.id, { method, amount: p?.amount });
+    res.status(201).json(view(p));
   }));
 
   return r;

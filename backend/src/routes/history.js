@@ -3,36 +3,17 @@
 //   -> { from, to, items: [{ kind: 'session', at, session } | { kind: 'reservation', at, reservation }], summary }
 //   Dat cho da thanh phien gui xe chi hien 1 lan (dang phien, kem ma dat cho) -> khong trung lap.
 const express = require('express');
-const { wrap, badRequest } = require('../errors');
+const { wrap } = require('../errors');
 const map = require('../mappers');
 const { RESERVATION_SELECT, expireStale } = require('../booking');
 const { SESSION_SELECT, sessionView } = require('../sessions');
-
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const MAX_DAYS = 366;
-const TZ = 'Asia/Ho_Chi_Minh';
-// Ngay hom nay theo gio Viet Nam
-const vnToday = () => new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
-const addDays = (d, n) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
-
-function parseDate(q, key, def) {
-  const raw = q[key];
-  if (raw === undefined || raw === '') return def;
-  const s = String(raw);
-  if (!DATE_RE.test(s) || Number.isNaN(Date.parse(`${s}T00:00:00Z`)) || new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) !== s) {
-    throw badRequest('invalid_date', `'${key}' phai co dang YYYY-MM-DD`);
-  }
-  return s;
-}
+const { TZ, parseRange } = require('../dates');
 
 module.exports = function historyRoutes({ db, auth }) {
   const r = express.Router();
 
   r.get('/history', auth.requireAuth, wrap(async (req, res) => {
-    const to = parseDate(req.query, 'to', vnToday());
-    const from = parseDate(req.query, 'from', addDays(to, -29));
-    if (from > to) throw badRequest('invalid_range', "'from' phai truoc hoac bang 'to'");
-    if ((Date.parse(to) - Date.parse(from)) / 86400000 >= MAX_DAYS) throw badRequest('range_too_long', `Toi da ${MAX_DAYS} ngay`);
+    const { from, to } = parseRange(req.query, { days: 30, maxDays: 366 });
     const kind = ['sessions', 'reservations'].includes(req.query.kind) ? req.query.kind : 'all';
     const lotId = req.query.lotId ? String(req.query.lotId).slice(0, 50) : null;
     await expireStale(db);

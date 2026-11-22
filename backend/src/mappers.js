@@ -14,7 +14,7 @@ const vehicle = (v) => v && ({
 const lot = (l) => l && ({
   id: l.id, name: l.name, address: l.address, totalSlots: l.total_slots, pricePerHour: l.price_per_hour,
   online: l.online, gates: { entry: l.entry_gate, exit: l.exit_gate }, fwVersion: l.fw_version,
-  lastSeenAt: l.last_seen_at,
+  lastSeenAt: l.last_seen_at, bookingEnabled: l.booking_enabled !== false,
   ...(l.free_slots !== undefined && { freeSlots: Number(l.free_slots) }),
   ...(l.rating_count !== undefined && {
     rating: { average: l.rating_avg == null ? null : Math.round(Number(l.rating_avg) * 10) / 10, count: Number(l.rating_count) },

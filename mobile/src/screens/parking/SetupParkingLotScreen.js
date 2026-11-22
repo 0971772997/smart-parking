@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Dimensions,
   Modal,
   Platform,
@@ -14,6 +13,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { appAlert } from '../../utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -97,7 +97,7 @@ export default function SetupParkingLotScreen({ navigation, route }) {
         }
       }
     } catch {
-      Alert.alert('Thông báo', 'Không thể kết nối máy chủ để lấy danh sách bãi đỗ.');
+      appAlert('Thông báo', 'Không thể kết nối máy chủ để lấy danh sách bãi đỗ.');
     } finally {
       setLoading(false);
     }
@@ -230,7 +230,7 @@ export default function SetupParkingLotScreen({ navigation, route }) {
   const saveEditLot = async () => {
     if (!editingLot) return;
     if (!editForm.name.trim()) {
-      Alert.alert('Lỗi', 'Vui lòng nhập tên bãi đỗ.');
+      appAlert('Lỗi', 'Vui lòng nhập tên bãi đỗ.');
       return;
     }
     setSavingEdit(true);
@@ -240,14 +240,14 @@ export default function SetupParkingLotScreen({ navigation, route }) {
         address: editForm.address.trim(),
         pricePerHour: parseInt(editForm.pricePerHour, 10) || 10000,
       });
-      Alert.alert('Thành công', 'Đã cập nhật thông tin bãi đỗ.');
+      appAlert('Thành công', 'Đã cập nhật thông tin bãi đỗ.');
       setEditingLot(null);
       fetchLots();
       if (activeLotId === editingLot.id) {
         fetchLotDetail(activeLotId);
       }
     } catch (e) {
-      Alert.alert('Lỗi', e.message || 'Không thể lưu thông tin bãi đỗ.');
+      appAlert('Lỗi', e.message || 'Không thể lưu thông tin bãi đỗ.');
     } finally {
       setSavingEdit(false);
     }
@@ -255,7 +255,7 @@ export default function SetupParkingLotScreen({ navigation, route }) {
 
   // Xóa bãi đỗ
   const handleDeleteLot = (lot) => {
-    Alert.alert(
+    appAlert(
       'Xóa bãi đỗ',
       `Bạn có chắc chắn muốn xóa bãi đỗ "${lot.name}" khỏi hệ thống?`,
       [
@@ -266,11 +266,11 @@ export default function SetupParkingLotScreen({ navigation, route }) {
           onPress: async () => {
             try {
               await lotsApi.remove(lot.id);
-              Alert.alert('Thành công', 'Đã xóa bãi đỗ khỏi hệ thống.');
+              appAlert('Thành công', 'Đã xóa bãi đỗ khỏi hệ thống.');
               removeLotFromRoute(lot.id);
               fetchLots();
             } catch (e) {
-              Alert.alert('Lỗi', e.message || 'Không thể xóa bãi đỗ này.');
+              appAlert('Lỗi', e.message || 'Không thể xóa bãi đỗ này.');
             }
           },
         },

@@ -4,6 +4,7 @@ const { wrap, conflict, notFound, badRequest, HttpError } = require('../errors')
 const v = require('../validate');
 const map = require('../mappers');
 const { createOtpService } = require('../otp');
+const { createLimiter } = require('../rateLimit');
 
 const USERNAME_RE = /^[a-zA-Z0-9_.]{4,30}$/;
 
@@ -25,8 +26,19 @@ function phone(body, key = 'phone', { optional = false } = {}) {
 const maskEmail = (e) => e.replace(/^(.{2})[^@]*(@.*)$/, (_, a, b) => `${a}***${b}`);
 const maskPhone = (p) => (p ? p.slice(0, 3) + '****' + p.slice(-3) : null);
 
-module.exports = function authRoutes({ db, auth, otpDevMode = true, social }) {
+// Tai khoan bi quan tri khoa -> khong cap token
+function issue(auth, u) {
+  if (u.locked_at) {
+    throw Object.assign(new HttpError(403, 'account_locked', 'Tai khoan da bi khoa'), { details: { reason: u.locked_reason || null } });
+  }
+  return auth.sign(u);
+}
+
+module.exports = function authRoutes({ db, auth, otpDevMode = true, social, loginLimits = {} }) {
   const r = express.Router();
+  // Chong do mat khau: <= 10 lan sai / 15 phut cho moi (IP + tai khoan), <= 50 lan sai / 15 phut moi IP
+  const perAccount = createLimiter({ max: 10, ...loginLimits.account });
+  const perIp = createLimiter({ max: 50, ...loginLimits.ip });
   const otp = createOtpService(db, { devMode: otpDevMode });
 
   r.post('/register', wrap(async (req, res) => {
@@ -44,7 +56,7 @@ module.exports = function authRoutes({ db, auth, otpDevMode = true, social }) {
       const u = await db.one(
         `INSERT INTO users (username, email, password_hash, full_name, phone) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
         [username, email, hash, fullName, ph]);
-      res.status(201).json({ token: auth.sign(u), user: map.user(u) });
+      res.status(201).json({ token: issue(auth, u), user: map.user(u) });
     } catch (e) {
       if (e.code === '23505' && /username/.test(e.constraint)) throw conflict('username_taken', 'Ten dang nhap da ton tai');
       if (e.code === '23505') throw conflict('email_taken', 'Email da duoc dang ky');
@@ -61,6 +73,13 @@ module.exports = function authRoutes({ db, auth, otpDevMode = true, social }) {
     const password = v.str(req.body, 'password', { max: 72 });
     const cleanId = rawId.trim().toLowerCase();
     const ph = normalizePhone(rawId);
+    const ip = req.ip || 'unknown';
+    const key = `${ip}|${cleanId}`;
+    const lim = [perAccount.check(key), perIp.check(ip)].find((x) => !x.allowed);
+    if (lim) {
+      throw Object.assign(new HttpError(429, 'too_many_attempts', 'Dang nhap sai qua nhieu lan, vui long thu lai sau'),
+        { details: { retryAfter: lim.retryAfter } });
+    }
 
     const u = await db.one(
       `SELECT * FROM users 
@@ -70,9 +89,12 @@ module.exports = function authRoutes({ db, auth, otpDevMode = true, social }) {
       [cleanId, ph || null]
     );
     if (!u || !(await bcrypt.compare(password, u.password_hash))) {
+      perAccount.fail(key);
+      perIp.fail(ip);
       throw new HttpError(401, 'invalid_credentials', 'Email/SDT hoac mat khau khong dung');
     }
-    res.json({ token: auth.sign(u), user: map.user(u) });
+    perAccount.reset(key);
+    res.json({ token: issue(auth, u), user: map.user(u) });
   }));
 
   // ---------- Dang nhap Google / Facebook ----------
@@ -113,7 +135,7 @@ module.exports = function authRoutes({ db, auth, otpDevMode = true, social }) {
       }
       if (!u) throw new HttpError(500, 'internal_error', 'Khong tao duoc ten dang nhap');
     }
-    res.json({ token: auth.sign(u), user: map.user(u), isNew });
+    res.json({ token: issue(auth, u), user: map.user(u), isNew });
   }));
 
   // ---------- OTP ----------
@@ -141,7 +163,7 @@ module.exports = function authRoutes({ db, auth, otpDevMode = true, social }) {
   r.post('/login/phone', wrap(async (req, res) => {
     const userId = await otp.verify(req.body?.otpId, req.body?.code, 'login_phone');
     const u = await db.one('SELECT * FROM users WHERE id = $1', [userId]);
-    res.json({ token: auth.sign(u), user: map.user(u) });
+    res.json({ token: issue(auth, u), user: map.user(u) });
   }));
 
   // B2b: tim ID (email)
@@ -166,6 +188,7 @@ module.exports = function authRoutes({ db, auth, otpDevMode = true, social }) {
   r.get('/me', auth.requireAuth, wrap(async (req, res) => {
     const u = await db.one('SELECT * FROM users WHERE id = $1', [req.user.id]);
     if (!u) throw new HttpError(401, 'invalid_token', 'Tai khoan khong ton tai');
+    issue(auth, u);
     res.json(map.user(u));
   }));
 

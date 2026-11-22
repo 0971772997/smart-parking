@@ -2,9 +2,10 @@
 const mqtt = require('mqtt');
 const crypto = require('crypto');
 
-function createMqttBridge({ url, username, password, topicPrefix }, sync, { timeoutMs = 8000 } = {}) {
+// connect: tiem client MQTT gia khi unit test (mac dinh mqtt.connect)
+function createMqttBridge({ url, username, password, topicPrefix }, sync, { timeoutMs = 8000, connect = mqtt.connect } = {}) {
   const pending = new Map(); // requestId -> { resolve, timer }
-  const client = mqtt.connect(url, {
+  const client = connect(url, {
     username,
     password,
     clientId: 'api-' + crypto.randomBytes(4).toString('hex'),
@@ -45,8 +46,10 @@ function createMqttBridge({ url, username, password, topicPrefix }, sync, { time
   });
 
   // Gui lenh toi ESP32, tra ve ack (hoac null neu het thoi gian cho)
+  // Server dang mat ket noi broker -> tra null NGAY (khong bat nguoi dung cho het timeoutMs)
   function sendCommand(lotId, cmd) {
     const requestId = cmd.requestId || crypto.randomUUID();
+    if (!client.connected) return Promise.resolve(null);
     return new Promise((resolve) => {
       const timer = setTimeout(() => { pending.delete(requestId); resolve(null); }, timeoutMs);
       pending.set(requestId, { resolve, timer });

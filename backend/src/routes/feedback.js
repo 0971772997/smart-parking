@@ -13,6 +13,7 @@ const v = require('../validate');
 const map = require('../mappers');
 const { notify } = require('../sessions');
 const { REVIEW_TAGS, displayName } = require('../feedback');
+const { audit } = require('../admin');
 
 const MAX_FAVORITES = 50;
 
@@ -148,6 +149,7 @@ module.exports = function feedbackRoutes({ db, auth }) {
       `UPDATE lot_reviews SET reply = $2::varchar, replied_by = CASE WHEN $2::varchar IS NULL THEN NULL ELSE $3::int END,
          replied_at = CASE WHEN $2::varchar IS NULL THEN NULL ELSE now() END WHERE id = $1 RETURNING *`, [id, reply, req.user.id]);
     if (!row) throw notFound('review_not_found', 'Khong tim thay danh gia');
+    await audit(db, req, 'review.reply', 'review', id, { lotId: row.lot_id, reply });
     if (reply) {
       const lot = await db.one('SELECT name FROM parking_lots WHERE id = $1', [row.lot_id]);
       await notify(db, { userId: row.user_id, type: 'review_reply', key: `rv${row.id}:reply:${Date.parse(row.replied_at)}`,

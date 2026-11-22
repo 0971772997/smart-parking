@@ -23,6 +23,16 @@ import ReviewFormScreen from '../screens/reviews/ReviewFormScreen';
 import SupportScreen from '../screens/support/SupportScreen';
 import SupportTicketFormScreen from '../screens/support/SupportTicketFormScreen';
 import SupportTicketDetailScreen from '../screens/support/SupportTicketDetailScreen';
+import AdminDashboardScreen from '../screens/admin/AdminDashboardScreen';
+import AdminUsersScreen from '../screens/admin/AdminUsersScreen';
+import AdminUserDetailScreen from '../screens/admin/AdminUserDetailScreen';
+import AdminLotsScreen from '../screens/admin/AdminLotsScreen';
+import AdminReservationsScreen from '../screens/admin/AdminReservationsScreen';
+import AdminSessionsScreen from '../screens/admin/AdminSessionsScreen';
+import AdminPaymentsScreen from '../screens/admin/AdminPaymentsScreen';
+import AdminReviewsScreen from '../screens/admin/AdminReviewsScreen';
+import AdminBroadcastScreen from '../screens/admin/AdminBroadcastScreen';
+import AdminAuditScreen from '../screens/admin/AdminAuditScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -53,6 +63,17 @@ export default function RootNavigator() {
       <Stack.Screen name="Support" component={SupportScreen} options={{ title: 'Hỗ trợ' }} />
       <Stack.Screen name="SupportTicketForm" component={SupportTicketFormScreen} options={{ title: 'Gửi yêu cầu', animation: 'slide_from_bottom' }} />
       <Stack.Screen name="SupportTicket" component={SupportTicketDetailScreen} options={{ title: 'Yêu cầu hỗ trợ' }} />
+      {/* Trang quan tri (chi admin - API tu chan tai khoan thuong) */}
+      <Stack.Screen name="AdminDashboard" component={AdminDashboardScreen} options={{ title: 'Trang quản trị' }} />
+      <Stack.Screen name="AdminUsers" component={AdminUsersScreen} options={{ title: 'Người dùng' }} />
+      <Stack.Screen name="AdminUserDetail" component={AdminUserDetailScreen} options={{ title: 'Người dùng' }} />
+      <Stack.Screen name="AdminLots" component={AdminLotsScreen} options={{ title: 'Bãi đỗ' }} />
+      <Stack.Screen name="AdminReservations" component={AdminReservationsScreen} options={{ title: 'Đặt chỗ' }} />
+      <Stack.Screen name="AdminSessions" component={AdminSessionsScreen} options={{ title: 'Phiên gửi xe' }} />
+      <Stack.Screen name="AdminPayments" component={AdminPaymentsScreen} options={{ title: 'Doanh thu' }} />
+      <Stack.Screen name="AdminReviews" component={AdminReviewsScreen} options={{ title: 'Đánh giá' }} />
+      <Stack.Screen name="AdminBroadcast" component={AdminBroadcastScreen} options={{ title: 'Thông báo chung' }} />
+      <Stack.Screen name="AdminAudit" component={AdminAuditScreen} options={{ title: 'Nhật ký quản trị' }} />
     </Stack.Navigator>
   );
 }

@@ -30,7 +30,7 @@ async function main() {
   const sync = createSync(db, { live });
   const device = createMqttBridge(config.mqtt, sync, { timeoutMs: config.deviceTimeoutMs });
   sync.attachDevice(device);
-  const app = createApp({ db, auth: createAuth(config), device, otpDevMode: config.otpDevMode,
+  const app = createApp({ db, auth: createAuth(config, { db }), device, otpDevMode: config.otpDevMode,
     social: createSocialVerifier(config.social), gatePass: createGatePass(config.jwtSecret), live,
     gateway: createMomoGateway(config.payments.momo), publicUrl: config.publicUrl, receiptSecret: config.jwtSecret,
     allowMockPayments: config.payments.allowMock,

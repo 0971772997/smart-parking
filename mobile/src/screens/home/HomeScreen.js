@@ -2,7 +2,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   Dimensions,
   Linking,
@@ -16,6 +15,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { appAlert } from '../../utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -192,18 +192,18 @@ export default function HomeScreen({ navigation }) {
             name: 'Vị trí GPS hiện tại',
           });
           setLocating(false);
-          Alert.alert('Định vị thành công', 'Đã cập nhật vị trí hiện tại của bạn.');
+          appAlert('Định vị thành công', 'Đã cập nhật vị trí hiện tại của bạn.');
         },
         () => {
           setLocating(false);
-          Alert.alert('Định vị', 'Đang sử dụng vị trí trung tâm: Hải Châu, Đà Nẵng.');
+          appAlert('Định vị', 'Đang sử dụng vị trí trung tâm: Hải Châu, Đà Nẵng.');
         },
         { timeout: 8000 }
       );
     } else {
       setTimeout(() => {
         setLocating(false);
-        Alert.alert('Định vị', 'Đang sử dụng vị trí trung tâm: Hải Châu, Đà Nẵng.');
+        appAlert('Định vị', 'Đang sử dụng vị trí trung tâm: Hải Châu, Đà Nẵng.');
       }, 500);
     }
   };
@@ -222,7 +222,7 @@ export default function HomeScreen({ navigation }) {
       default: `https://www.google.com/maps/dir/?api=1&destination=${query}`,
     });
     Linking.openURL(url).catch(() => {
-      Alert.alert('Chỉ đường', `Địa chỉ bãi đỗ: ${lot.address || lot.name}`);
+      appAlert('Chỉ đường', `Địa chỉ bãi đỗ: ${lot.address || lot.name}`);
     });
   };
 
@@ -237,7 +237,7 @@ export default function HomeScreen({ navigation }) {
       if (was) await favoritesApi.remove(lot.id); else await favoritesApi.add(lot.id);
     } catch (e) {
       flip(was);
-      Alert.alert('Yêu thích', e.message || 'Không cập nhật được danh sách yêu thích.');
+      appAlert('Yêu thích', e.message || 'Không cập nhật được danh sách yêu thích.');
     } finally {
       setFavBusy(null);
     }
@@ -246,7 +246,7 @@ export default function HomeScreen({ navigation }) {
   // Thêm xe mới
   const handleAddVehicle = async () => {
     if (!vehicleForm.plateNumber.trim()) {
-      Alert.alert('Lỗi', 'Vui lòng nhập biển số xe.');
+      appAlert('Lỗi', 'Vui lòng nhập biển số xe.');
       return;
     }
     setSavingVehicle(true);
@@ -256,12 +256,12 @@ export default function HomeScreen({ navigation }) {
         brand: vehicleForm.brand.trim() || undefined,
         color: vehicleForm.color.trim() || undefined,
       });
-      Alert.alert('Thành công', 'Đã thêm phương tiện mới.');
+      appAlert('Thành công', 'Đã thêm phương tiện mới.');
       setShowAddVehicleModal(false);
       setVehicleForm({ plateNumber: '', brand: '', color: '' });
       loadData(true);
     } catch (e) {
-      Alert.alert('Lỗi', e.message || 'Không thể thêm xe.');
+      appAlert('Lỗi', e.message || 'Không thể thêm xe.');
     } finally {
       setSavingVehicle(false);
     }
@@ -269,7 +269,7 @@ export default function HomeScreen({ navigation }) {
 
   // Xóa xe
   const handleDeleteVehicle = (vehicle) => {
-    Alert.alert('Xóa phương tiện', `Bạn có chắc muốn xóa xe biển số ${vehicle.plateNumber}?`, [
+    appAlert('Xóa phương tiện', `Bạn có chắc muốn xóa xe biển số ${vehicle.plateNumber}?`, [
       { text: 'Hủy', style: 'cancel' },
       {
         text: 'Xóa ngay',
@@ -277,10 +277,10 @@ export default function HomeScreen({ navigation }) {
         onPress: async () => {
           try {
             await vehiclesApi.remove(vehicle.id);
-            Alert.alert('Thành công', 'Đã xóa phương tiện.');
+            appAlert('Thành công', 'Đã xóa phương tiện.');
             loadData(true);
           } catch (e) {
-            Alert.alert('Lỗi', e.message || 'Không thể xóa xe.');
+            appAlert('Lỗi', e.message || 'Không thể xóa xe.');
           }
         },
       },
@@ -296,10 +296,10 @@ export default function HomeScreen({ navigation }) {
         phone: profileForm.phone.trim() || undefined,
       });
       updateUser(res);
-      Alert.alert('Thành công', 'Hồ sơ người dùng đã được cập nhật.');
+      appAlert('Thành công', 'Hồ sơ người dùng đã được cập nhật.');
       setShowEditProfileModal(false);
     } catch (e) {
-      Alert.alert('Lỗi', e.message || 'Không thể cập nhật hồ sơ.');
+      appAlert('Lỗi', e.message || 'Không thể cập nhật hồ sơ.');
     } finally {
       setSavingProfile(false);
     }
@@ -406,6 +406,17 @@ export default function HomeScreen({ navigation }) {
                 {summary.onlineCount > 0 ? `${summary.onlineCount} trạm online` : 'Offline'}
               </Text>
             </View>
+
+            {user?.role === 'admin' && (
+              <Pressable
+                onPress={() => navigation.navigate('AdminDashboard')}
+                style={({ pressed }) => [styles.iconBtn, pressed && styles.btnPressed]}
+                accessibilityLabel="Trang quản trị"
+                hitSlop={8}
+              >
+                <Ionicons name="speedometer-outline" size={18} color={colors.primary} />
+              </Pressable>
+            )}
 
             {user?.role === 'admin' && (
               <Pressable
@@ -1253,6 +1264,18 @@ function AccountTabSection({ user, onOpenEdit, onLogout, onTransactions, onNavig
         <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
       </Pressable>
 
+      {user?.role === 'admin' ? (
+        <Pressable onPress={() => onNavigate('AdminDashboard')}
+          style={({ pressed }) => [styles.detailsCard, styles.txRow, styles.adminEntry, pressed && styles.btnPressed]} accessibilityRole="button">
+          <Ionicons name="speedometer" size={20} color="#fff" />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.txTitle, { color: '#fff' }]}>Trang quản trị</Text>
+            <Text style={[styles.txSub, { color: 'rgba(255,255,255,0.75)' }]}>Người dùng, bãi đỗ, doanh thu, đặt chỗ, sự cố...</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color="#fff" />
+        </Pressable>
+      ) : null}
+
       <View style={styles.detailsCard}>
         {ACCOUNT_LINKS.map((l, i) => (
           <Pressable key={l.screen} onPress={() => onNavigate(l.screen)}
@@ -1377,6 +1400,7 @@ const styles = StyleSheet.create({
   statusPillText: { fontSize: 11, color: colors.textMuted, fontWeight: '600' },
   txRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   menuRow: { paddingVertical: 10 },
+  adminEntry: { backgroundColor: colors.navy, borderColor: colors.navy },
   menuBorder: { borderTopWidth: 1, borderTopColor: '#F1F5F9' },
   txTitle: { fontSize: 14, fontWeight: '800', color: colors.text },
   txSub: { fontSize: 12, color: colors.textMuted, marginTop: 1 },

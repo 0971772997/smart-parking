@@ -10,10 +10,23 @@ const { expireStale } = require('../booking');
 const { ACTIVE_WHERE } = require('../sessions');
 
 const MAX_WAIT_S = 25;
+// Moi thay doi danh thuc MOI app dang cho -> tinh anh chup 1 lan / phien ban (toi da 2s) roi dung chung,
+// thay vi N app x 4 truy van cung luc ("thundering herd")
+const SNAPSHOT_MS = 2000;
 const TODAY = `(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date`;
 
 module.exports = function liveRoutes({ db, live }) {
   const r = express.Router();
+  const snaps = new Map(); // key -> { version, at, promise }
+  function shared(key, build) {
+    const ver = live.version();
+    const c = snaps.get(key);
+    if (c && c.version === ver && Date.now() - c.at < SNAPSHOT_MS) return c.promise;
+    const promise = build().catch((e) => { snaps.delete(key); throw e; });
+    snaps.set(key, { version: ver, at: Date.now(), promise });
+    if (snaps.size > 200) snaps.clear();
+    return promise;
+  }
 
   async function waitChange(req) {
     const since = typeof req.query.v === 'string' ? req.query.v : '';
@@ -28,6 +41,10 @@ module.exports = function liveRoutes({ db, live }) {
 
   r.get('/live', wrap(async (req, res) => {
     const w = await waitChange(req);
+    res.json({ ...w, ...(await shared('all', () => overview())) });
+  }));
+
+  async function overview() {
     await expireStale(db);
     const { rows } = await db.query(`
       SELECT l.*, COUNT(s.id) FILTER (WHERE s.state = 'free') AS free_slots,
@@ -35,17 +52,21 @@ module.exports = function liveRoutes({ db, live }) {
              COUNT(s.id) FILTER (WHERE s.state = 'reserved')::int AS reserved
       FROM parking_lots l LEFT JOIN slots s ON s.lot_id = l.id GROUP BY l.id ORDER BY l.name`);
     const cars = new Map((await carsInLot()).map((x) => [x.lot_id, x.n]));
-    res.json({
-      ...w,
+    return {
       lots: rows.map((l) => ({ ...map.lot(l), occupiedSlots: l.occupied, reservedSlots: l.reserved, carsInLot: cars.get(l.id) || 0 })),
       at: new Date().toISOString(),
-    });
-  }));
+    };
+  }
 
   r.get('/lots/:lotId/live', wrap(async (req, res) => {
     const w = await waitChange(req);
+    const lotId = String(req.params.lotId);
+    res.json({ ...w, ...(await shared(`lot:${lotId}`, () => lotDetail(lotId))) });
+  }));
+
+  async function lotDetail(lotId) {
     await expireStale(db);
-    const lot = await db.one('SELECT * FROM parking_lots WHERE id = $1', [req.params.lotId]);
+    const lot = await db.one('SELECT * FROM parking_lots WHERE id = $1', [lotId]);
     if (!lot) throw notFound('lot_not_found', 'Khong tim thay bai do');
     const { rows: slots } = await db.query('SELECT * FROM slots WHERE lot_id = $1 ORDER BY slot_number', [lot.id]);
     const count = (st) => slots.filter((s) => s.state === st).length;
@@ -58,8 +79,7 @@ module.exports = function liveRoutes({ db, live }) {
       `SELECT id, type, payload, created_at FROM device_events
        WHERE lot_id = $1 AND type IN ('gate', 'slot_changed', 'entry_rejected', 'reservation_expired')
        ORDER BY id DESC LIMIT 10`, [lot.id]);
-    res.json({
-      ...w,
+    return {
       ...map.lot(lot),
       freeSlots: count('free'), occupiedSlots: count('occupied'), reservedSlots: count('reserved'),
       carsInLot: (await carsInLot(lot.id))[0]?.n || 0,
@@ -67,8 +87,8 @@ module.exports = function liveRoutes({ db, live }) {
       slots: slots.map(map.slot),
       events: events.map((e) => ({ id: Number(e.id), type: e.type, payload: e.payload, createdAt: e.created_at })),
       at: new Date().toISOString(),
-    });
-  }));
+    };
+  }
 
   return r;
 };

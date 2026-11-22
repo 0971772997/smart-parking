@@ -16,6 +16,76 @@ Lệnh: `cd backend && npm test`. Test chạy trên nhánh DB Neon `test`, ESP32
 
 Các nhóm test chính: đăng ký/đăng nhập, phân quyền, đặt chỗ (thành công / ô đã đặt / thiết bị timeout 504 / offline 503), xe vào → `fulfilled` → xe ra → tính phí, hết hạn giữ chỗ, thanh toán (chưa kết thúc 409, người khác 404, trả 2 lần 409, thu tiền mặt khách vãng lai), thống kê.
 
+### 1.1 Bộ kiểm thử đầy đủ (22/11/2026)
+
+| Lệnh (`backend/`) | Nhóm | Nội dung chính |
+|---|---|---|
+| `npm run test:unit` | **Đơn vị** (không cần DB) | Tính phí (bảng 10 trường hợp, phí không giảm theo thời gian, khớp phí dự kiến), vòng đời phiên; JWT (thiếu / sai khoá / hết hạn / `alg: none` / sửa payload / bị khoá / đổi quyền / cache); mã QR cổng (sửa từng phần, hết hạn, khoá khác); chữ ký MoMo; giới hạn đăng nhập; kiểm tra dữ liệu vào (nhầm kiểu, ngày, SĐT); MQTT (ack, timeout, mất broker); long-poll; thông báo đẩy khi mạng lỗi; API khi CSDL mất kết nối |
+| `npm run test:integration` | **Tích hợp API** (DB `test`) | Toàn bộ API theo chức năng: xác thực, đặt chỗ, QR cổng, phiên gửi xe, thanh toán MoMo, thông báo đẩy, lịch sử / yêu thích / đánh giá / hỗ trợ, quản trị |
+| `npm run test:e2e` | **Đầu cuối** (server HTTP thật) | Đặt chỗ → QR vào → xe vào ô → gia hạn → rời ô (chốt phí) → MoMo (IPN ký thật) → biên nhận → QR ra → kết thúc → lịch sử / đánh giá / doanh thu; thanh toán bị từ chối rồi trả lại; MoMo mất kết nối; ESP32 không phản hồi; bãi offline; huỷ / không đến; app mất mạng khi long-poll |
+| `npm run test:security` | **Phân quyền & bảo mật** | Truy cập chéo 18 API (B đụng tài nguyên A → 404, dữ liệu A không đổi); 26 API quản trị (khách 401, tài xế 403); token thật (hết hạn, khoá giả, tự gán admin, tài khoản xoá / khoá); dò mật khẩu → 429; không lộ hash / email; chèn SQL, ký tự đại diện LIKE; mass assignment; nhầm kiểu dữ liệu |
+| `npm run test:load` | **Tải đồng thời** | 10 người tranh 1 ô; bấm đặt chỗ 5 lần; 8 IPN cùng lúc; yêu thích / đánh giá trùng; gia hạn phiên / giữ chỗ vượt giới hạn |
+| `npm run perf` | **Hiệu năng** | p50/p95/p99, yêu cầu/giây trên 600 phiên / 60 tài xế mẫu; đột biến 50 kết nối; 500 kết nối long-poll |
+| `npm test` / `npm run test:coverage` | Tất cả | Chạy mọi nhóm trên + đo độ phủ mã nguồn |
+| `cd mobile && npm test` | **App** (node:test, không cần thiết bị) | Gọi API khi mất mạng / timeout / Render đang khởi động / 502-504 HTML; ánh xạ lỗi tiếng Việt; tài khoản bị khoá giữa chừng; long-poll thử lại lùi dần 2-4-8-15 giây, tạm dừng khi chạy nền; hộp thoại xác nhận chạy trên web; tiện ích ngày / tiền / thời gian |
+
+### 1.2 Kết quả (22/11/2026)
+
+| Nhóm | Kết quả |
+|---|---|
+| Backend – toàn bộ (`npm test`: đơn vị + tích hợp + E2E + bảo mật + tải đồng thời) | **273/273 PASS** (55 nhóm, khoảng 2,5 phút) |
+| Độ phủ mã nguồn backend (`npm run test:coverage`) | **98,8 % dòng lệnh**, 85,9 % nhánh, 95,4 % hàm |
+| App (`mobile/ npm test`) | **31/31 PASS** |
+| `npx expo-doctor` | 20/20 kiểm tra đạt |
+
+**Lỗi tìm ra nhờ kiểm thử (đã sửa):**
+
+| # | Nhóm test phát hiện | Lỗi | Cách sửa |
+|---|---|---|---|
+| 1 | Bảo mật (thiết kế ca kiểm thử) | Đăng nhập không giới hạn số lần sai → dò được mật khẩu | Tối đa 10 lần sai / 15 phút cho mỗi (IP + tài khoản), 50 lần / IP → `429 too_many_attempts`; Render: `trust proxy` để lấy IP thật |
+| 2 | Đơn vị | `validate.int` nhận cả `[1]`, `true`, số vượt giới hạn an toàn | Chỉ nhận số hoặc chuỗi chữ số, `Number.isSafeInteger` |
+| 3 | Bảo mật | Tìm kiếm quản trị không thoát `%` `_` → tìm "%_%" ra mọi tài khoản | Thoát ký tự đại diện LIKE |
+| 4 | Tải đồng thời | Bấm "Gia hạn phiên" 8 lần cùng lúc → gia hạn 8 lần (giới hạn 5) | Điều kiện nằm trong câu `UPDATE` (nguyên tử) |
+| 5 | Tải đồng thời (rà cùng lúc) | Gia hạn giữ chỗ cùng lỗi trên | Giữ "suất" gia hạn trong DB trước khi gửi lệnh ESP32, lỗi thì trả lại |
+| 6 | Gián đoạn | CSDL mất kết nối → `500` chung chung | `503 service_unavailable`, app báo "máy chủ tạm gián đoạn" |
+| 7 | Gián đoạn | Server mất broker MQTT → người dùng chờ hết 8 giây mới báo lỗi | Báo lỗi ngay khi chưa kết nối broker |
+| 8 | Hiệu năng | Mỗi thay đổi làm **mọi** app đang long-poll cùng truy vấn DB (500 app ≈ 2.000 truy vấn) | Ảnh chụp `/live` tính 1 lần / phiên bản, dùng chung |
+| 9 | Hiệu năng | Pool DB 5 kết nối; dọn đặt chỗ hết hạn tốn 2 lượt gọi DB / lần đọc | Pool 10 (`DB_POOL_MAX`), gộp thành 1 câu SQL |
+| 10 | Tương thích thiết bị | `Alert.alert` là hàm rỗng trên web → **không xoá được xe / bãi**, lỗi bị nuốt | `appAlert`: điện thoại dùng `Alert`, web dùng `confirm` / `alert` |
+| 11 | Gián đoạn (app) | Render đang khởi động trả trang HTML 502/503 → app báo "lỗi máy chủ" | Mã `service_unavailable` + thông báo "máy chủ đang khởi động" |
+| 12 | Bảo mật | Thiếu header bảo mật; body quá lớn trả 500 | `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`; `413 payload_too_large` |
+
+### 1.3 Hiệu năng (`npm run perf`, server trên máy ↔ Neon Singapore, 600 phiên / 60 tài xế mẫu)
+
+| API | Đồng thời | p50 (ms) | p95 (ms) | Yêu cầu/giây | Lỗi |
+|---|---:|---:|---:|---:|---:|
+| GET /lots | 10 | 80 | 119 | 109 | 0 |
+| GET /lots/:id (sơ đồ ô) | 10 | 155 | 197 | 62 | 0 |
+| GET /lots/:id/reviews | 10 | 154 | 199 | 63 | 0 |
+| GET /sessions/active | 10 | 129 | 392 | 65 | 0 |
+| GET /history (30 ngày) | 10 | 173 | 396 | 50 | 0 |
+| GET /payments | 10 | 52 | 72 | 181 | 0 |
+| GET /admin/overview | 10 | 356 | 613 | 26 | 0 |
+| GET /admin/payments | 10 | 182 | 251 | 53 | 0 |
+| GET /lots – đột biến | **50** | 386 | 432 | 125 | 0 |
+| POST đặt chỗ (lệnh tới ESP32) | 1 | 422 | 476 | – | 0 |
+
+- Long-poll: **500/500** kết nối được giữ, một thay đổi đánh thức tất cả trong **197 ms**.
+- Trước khi tối ưu (mục 8, 9): `/lots` p95 271 ms, `/admin/overview` 1.003 ms, đột biến 50 kết nối 1.318 ms (nhanh hơn khoảng 2–3 lần sau khi sửa).
+- Ngưỡng đạt: API tài xế p95 < 800 ms, quản trị < 1.500 ms, đột biến < 2.000 ms, ghi < 1.500 ms, 0 lỗi.
+- Tính phí: khoảng 160 ns / lần.
+- Lưu ý: Render gói Free "ngủ" sau 15 phút không có truy cập, nên lần gọi đầu mất khoảng 30–50 giây. App báo "máy chủ đang khởi động" (`onSlow` sau 4 giây).
+
+### 1.4 Tương thích thiết bị & gián đoạn mạng trên app (Chrome, 22/11/2026)
+
+| Kiểm tra | Kết quả |
+|---|---|
+| 7 màn hình (Trang chủ, Hồ sơ, Lịch sử, Chi tiết phiên, Hỗ trợ, Báo cáo sự cố, Bãi yêu thích) × 5 chiều rộng: 320 (iPhone SE 1), 360 (Android nhỏ), 390 (iPhone 14), 412 (Pixel 7), 768 (iPad) | Không phần tử nào tràn ngang / bị cắt; ở 320px tên dài được rút gọn "…" |
+| Tắt API khi app đang mở | Sau khoảng 5 giây hiện banner "Mất kết nối máy chủ – đang thử kết nối lại…", **vẫn hiện dữ liệu cũ** |
+| Bật lại API | App tự kết nối lại và tắt banner sau **7,7 giây**, không cần thao tác |
+| `app.json` | Android (`vn.smartpark.app`, quyền Camera + thông báo), iOS hỗ trợ iPad, khoá dọc; `expo-doctor` 20/20 |
+| Hạn chế | **Chưa chạy trên điện thoại thật** trong đợt này (chỉ Chrome mô phỏng chiều rộng). Nên thử bằng bản dev build Android + Expo Go trên iPhone: quét QR bằng camera, thông báo đẩy khi tắt màn hình, cỡ chữ lớn của hệ điều hành. Ghi chú: một trình duyệt mở **6 tab app trở lên** cùng lúc sẽ đụng giới hạn 6 kết nối HTTP/1.1 / máy chủ của Chrome (mỗi tab giữ 1 long-poll); người dùng bình thường mở 1 app nên không gặp. |
+
 ## 2. Kiểm thử end-to-end với Wokwi (API thật + broker + ESP32 mô phỏng)
 
 ### 2.1 Bằng script `backend/scripts/e2e.js` (19/11/2026)

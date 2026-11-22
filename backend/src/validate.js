@@ -22,8 +22,10 @@ function int(body, key, { min, max, optional = false, def } = {}) {
     if (optional) return null;
     throw badRequest('validation_error', `Thieu truong '${key}'`);
   }
-  const n = Number(v);
-  if (!Number.isInteger(n) || (min !== undefined && n < min) || (max !== undefined && n > max)) {
+  // Chi nhan so hoac chuoi chu so (chan mang [1], true, '1e3', so vuot gioi han an toan)
+  const okType = typeof v === 'number' || (typeof v === 'string' && /^-?\d{1,16}$/.test(v.trim()));
+  const n = okType ? Number(v) : NaN;
+  if (!Number.isSafeInteger(n) || (min !== undefined && n < min) || (max !== undefined && n > max)) {
     throw badRequest('validation_error', `'${key}' phai la so nguyen trong khoang ${min}..${max}`);
   }
   return n;

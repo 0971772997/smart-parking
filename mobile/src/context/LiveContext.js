@@ -8,6 +8,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { AppState } from 'react-native';
 import { useAuth } from './AuthContext';
 import { liveApi, notificationsApi } from '../api/sessions';
+import { runLivePoll } from '../realtime/livePoll';
 
 const LiveContext = createContext(null);
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
@@ -36,30 +37,15 @@ export function LiveProvider({ children }) {
 
   useEffect(() => {
     let stop = false;
-    let v = '';
-    let fails = 0;
-    (async () => {
-      while (!stop) {
-        if (!activeRef.current) { await sleep(1500); continue; }
-        try {
-          const r = await liveApi.all(v, 25);
-          if (stop) break;
-          fails = 0;
-          setOnline(true);
-          setLastSyncAt(Date.now());
-          if (r.version !== v) {
-            v = r.version;
-            setVersion(r.version);
-            setLots(r.lots || []);
-          }
-        } catch {
-          if (stop) break;
-          fails += 1;
-          if (fails >= 1) setOnline(false);
-          await sleep(Math.min(15000, 1000 * 2 ** Math.min(fails, 4)));
-        }
-      }
-    })();
+    // Vong long-poll + thu lai khi mat mang: src/realtime/livePoll.js
+    runLivePoll({
+      fetchLive: (v) => liveApi.all(v, 25),
+      isActive: () => activeRef.current,
+      isStopped: () => stop,
+      sleep,
+      onOnline: (ok, at) => { setOnline(ok); if (ok) setLastSyncAt(at); },
+      onData: (r) => { setVersion(r.version); setLots(r.lots || []); },
+    });
     return () => { stop = true; };
   }, []);
 

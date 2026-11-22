@@ -5,6 +5,7 @@ const v = require('../validate');
 const map = require('../mappers');
 const { RULES, RESERVATION_SELECT, newCode, estimateFee, expireStale, suspension, zoneSql } = require('../booking');
 const { notify, hhmm } = require('../sessions');
+const { audit } = require('../admin');
 
 // Tom tat theo khu vuc: [{ zone, total, free, occupied, reserved }]
 function zonesOf(slots) {
@@ -74,6 +75,7 @@ module.exports = function lotRoutes({ db, auth, device }) {
   // Quy tac: xem src/booking.js (RULES). Tra ve 201 khi ESP32 xac nhan giu o (status 'active').
   r.post('/:lotId/reservations', auth.requireAuth, wrap(async (req, res) => {
     const lot = await getLot(req.params.lotId);
+    if (lot.booking_enabled === false) throw conflict('lot_booking_disabled', 'Bai tam ngung nhan dat cho');
     const slotNumber = v.int(req.body, 'slotNumber', { min: 1, max: lot.total_slots, optional: true });
     const zone = v.str(req.body, 'zone', { max: 10, optional: true });
     const { hold, duration } = RULES;
@@ -169,7 +171,58 @@ module.exports = function lotRoutes({ db, auth, device }) {
                      SELECT $1, n, ${zoneSql('n', '$2::int')} FROM generate_series(1, $2) n`, [id, totalSlots]);
       return l;
     });
+    await audit(db, req, 'lot.create', 'lot', id, { name, totalSlots, pricePerHour });
     res.status(201).json(map.lot(lot));
+  }));
+
+  // Sua bai: { name?, address?, pricePerHour?, bookingEnabled?, totalSlots? }
+  // Tang so o -> them o moi; giam -> chi khi cac o bi bo chua tung co dat cho / luot gui (giu lich su)
+  r.put('/:lotId', auth.requireAuth, auth.requireAdmin, wrap(async (req, res) => {
+    const lot = await getLot(req.params.lotId);
+    const name = v.str(req.body, 'name', { max: 100, optional: true });
+    const address = req.body?.address === '' ? '' : v.str(req.body, 'address', { optional: true });
+    const pricePerHour = v.int(req.body, 'pricePerHour', { min: 0, max: 10000000, optional: true });
+    const totalSlots = v.int(req.body, 'totalSlots', { min: 1, max: 100, optional: true });
+    const be = req.body?.bookingEnabled;
+    if (be !== undefined && typeof be !== 'boolean') throw badRequest('validation_error', "'bookingEnabled' phai la true/false");
+    const upd = await db.tx(async (q) => {
+      if (totalSlots && totalSlots > lot.total_slots) {
+        await q.query(`INSERT INTO slots (lot_id, slot_number, zone)
+                       SELECT $1, n, ${zoneSql('n', '$3::int')} FROM generate_series($2::int + 1, $3::int) n
+                       ON CONFLICT (lot_id, slot_number) DO NOTHING`, [lot.id, lot.total_slots, totalSlots]);
+      } else if (totalSlots && totalSlots < lot.total_slots) {
+        const used = (await q.query(
+          `SELECT s.slot_number FROM slots s WHERE s.lot_id = $1 AND s.slot_number > $2
+             AND (s.state <> 'free' OR EXISTS (SELECT 1 FROM reservations r WHERE r.slot_id = s.id)
+                  OR EXISTS (SELECT 1 FROM parking_sessions ps WHERE ps.slot_id = s.id))`, [lot.id, totalSlots])).rows;
+        if (used.length) {
+          throw Object.assign(conflict('slots_in_use', 'Cac o bi bo da co lich su dat cho / gui xe'),
+            { details: { slots: used.map((x) => x.slot_number) } });
+        }
+        await q.query('DELETE FROM slots WHERE lot_id = $1 AND slot_number > $2', [lot.id, totalSlots]);
+      }
+      return (await q.query(
+        `UPDATE parking_lots SET name = COALESCE($2, name), address = CASE WHEN $3::varchar IS NULL THEN address ELSE NULLIF($3::varchar, '') END,
+           price_per_hour = COALESCE($4, price_per_hour), total_slots = COALESCE($5, total_slots),
+           booking_enabled = COALESCE($6, booking_enabled) WHERE id = $1 RETURNING *`,
+        [lot.id, name, address, pricePerHour, totalSlots, be ?? null])).rows[0];
+    });
+    const changes = Object.fromEntries(Object.entries({ name, address, pricePerHour, totalSlots, bookingEnabled: be })
+      .filter(([, x]) => x !== undefined && x !== null));
+    await audit(db, req, 'lot.update', 'lot', lot.id, changes);
+    res.json(map.lot(upd));
+  }));
+
+  // Xoa bai: chi khi chua co lich su (tranh mat du lieu giao dich). Co lich su -> tat nhan dat cho thay vi xoa.
+  r.delete('/:lotId', auth.requireAuth, auth.requireAdmin, wrap(async (req, res) => {
+    const lot = await getLot(req.params.lotId);
+    const used = await db.one(
+      `SELECT EXISTS (SELECT 1 FROM reservations r JOIN slots s ON s.id = r.slot_id WHERE s.lot_id = $1)
+           OR EXISTS (SELECT 1 FROM parking_sessions ps JOIN slots s ON s.id = ps.slot_id WHERE s.lot_id = $1) AS used`, [lot.id]);
+    if (used.used) throw conflict('lot_has_history', 'Bai da co lich su gui xe - hay tam ngung nhan dat cho thay vi xoa');
+    await db.query('DELETE FROM parking_lots WHERE id = $1', [lot.id]);
+    await audit(db, req, 'lot.delete', 'lot', lot.id, { name: lot.name });
+    res.json({ ok: true });
   }));
 
   r.post('/:lotId/gates/:gate/:action', auth.requireAuth, auth.requireAdmin, wrap(async (req, res) => {
@@ -181,6 +234,7 @@ module.exports = function lotRoutes({ db, auth, device }) {
     const ack = await device.sendCommand(lot.id, { action: `${action}_gate`, gate });
     if (!ack) throw new HttpError(504, 'device_timeout', 'Thiet bi khong phan hoi');
     if (!ack.ok) throw conflict(ack.error || 'device_error', 'Thiet bi tu choi lenh');
+    await audit(db, req, 'lot.gate', 'lot', lot.id, { gate, action });
     res.json({ ok: true, gate, action });
   }));
 

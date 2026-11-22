@@ -84,7 +84,18 @@ const MESSAGES = {
   lot_required: 'Vui lòng chọn bãi đỗ xảy ra sự cố.',
   too_many_tickets: 'Bạn đã gửi nhiều yêu cầu trong 1 giờ qua. Vui lòng gọi hotline nếu khẩn cấp.',
   forbidden: 'Chỉ nhân viên / quản trị viên được dùng chức năng này.',
+  // Quan tri
+  account_locked: 'Tài khoản của bạn đã bị khoá. Vui lòng liên hệ hỗ trợ (hotline 1900 6868).',
+  cannot_modify_self: 'Không thể tự khoá hoặc tự gỡ quyền quản trị của chính mình.',
+  user_not_found: 'Không tìm thấy tài khoản.',
+  lot_exists: 'Mã bãi đỗ đã tồn tại.',
+  slots_in_use: 'Không giảm được số ô: các ô bị bỏ đã có lịch sử đặt chỗ / gửi xe.',
+  lot_has_history: 'Bãi đã có lịch sử gửi xe nên không xoá được. Hãy dùng “Ngưng đặt chỗ”.',
+  lot_booking_disabled: 'Bãi đỗ đang tạm ngưng nhận đặt chỗ.',
   internal_error: 'Máy chủ gặp sự cố. Vui lòng thử lại sau.',
+  service_unavailable: 'Máy chủ đang khởi động hoặc tạm gián đoạn. Vui lòng thử lại sau ít giây.',
+  too_many_attempts: 'Bạn đã nhập sai quá nhiều lần. Vui lòng thử lại sau.',
+  payload_too_large: 'Dữ liệu gửi lên quá lớn.',
 };
 
 export class ApiError extends Error {
@@ -98,6 +109,10 @@ export class ApiError extends Error {
 
 let authToken = null;
 export const setAuthToken = (t) => { authToken = t; };
+
+// Tai khoan bi khoa giua chung -> AuthContext dang xuat + ve man dang nhap
+let onAccountLocked = null;
+export const setAccountLockedHandler = (fn) => { onAccountLocked = fn; };
 
 // onSlow: goi khi request > 4s (Render free dang "thuc day")
 export async function request(path, { method = 'GET', body, timeoutMs = 70000, onSlow } = {}) {
@@ -127,10 +142,18 @@ export async function request(path, { method = 'GET', body, timeoutMs = 70000, o
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { /* body khong phai JSON */ }
   if (!res.ok) {
-    const code = data?.error || 'internal_error';
+    // 502/503/504 khong co JSON = Render dang khoi dong / proxy loi -> bao gian doan tam thoi (khong phai loi du lieu)
+    const code = data?.error || ([502, 503, 504].includes(res.status) ? 'service_unavailable' : 'internal_error');
     let msg = MESSAGES[code] || data?.message || MESSAGES.internal_error;
     if (code === 'otp_wrong' && data?.details?.attemptsLeft !== undefined) {
       msg = `Mã OTP không đúng (còn ${data.details.attemptsLeft} lần thử).`;
+    }
+    if (code === 'account_locked' && data?.details?.reason) {
+      msg = `Tài khoản đã bị khoá: ${data.details.reason}. Liên hệ hotline 1900 6868 nếu cần hỗ trợ.`;
+    }
+    if (code === 'account_locked' && authToken && onAccountLocked) onAccountLocked(msg);
+    if (code === 'too_many_attempts' && data?.details?.retryAfter) {
+      msg = `Bạn đã nhập sai quá nhiều lần. Thử lại sau ${Math.ceil(data.details.retryAfter / 60)} phút.`;
     }
     if (code === 'otp_too_soon' && data?.details?.retryAfter) {
       msg = `Vui lòng đợi ${data.details.retryAfter} giây để gửi lại mã.`;

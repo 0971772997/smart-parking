@@ -91,13 +91,18 @@ module.exports = function reservationRoutes({ db, auth, device, gatePass }) {
     const minutes = v.int(req.body, 'minutes', { min, max });
     requireActive(row);
     if (new Date(row.expires_at) <= new Date()) throw conflict('reservation_expired', 'Dat cho da het gio giu');
-    if (row.extend_count >= maxTimes) throw conflict('extend_limit', `Chi duoc gia han toi da ${maxTimes} lan`);
+    // Giu "suat" gia han truoc (nguyen tu) -> bam nhieu lan cung luc khong vuot gioi han; thiet bi loi -> tra suat lai
+    const claim = await db.one(
+      `UPDATE reservations SET extend_count = extend_count + 1, updated_at = now()
+       WHERE id = $1 AND status = 'active' AND extend_count < $2 RETURNING id`, [row.id, maxTimes]);
+    if (!claim) throw conflict('extend_limit', `Chi duoc gia han toi da ${maxTimes} lan`);
+    const release = () => db.query('UPDATE reservations SET extend_count = extend_count - 1 WHERE id = $1 AND extend_count > 0', [row.id]);
     const ack = await device.sendCommand(row.lot_id, { action: 'extend_reservation', slot: row.slot_number, minutes });
-    if (!ack) throw new HttpError(504, 'device_timeout', 'Thiet bi khong phan hoi');
-    if (!ack.ok) throw conflict(ack.error || 'device_error', 'Thiet bi tu choi');
+    if (!ack) { await release(); throw new HttpError(504, 'device_timeout', 'Thiet bi khong phan hoi'); }
+    if (!ack.ok) { await release(); throw conflict(ack.error || 'device_error', 'Thiet bi tu choi'); }
     const upd = await db.one(
       `UPDATE reservations SET minutes = minutes + $2, expires_at = expires_at + make_interval(mins => $2),
-         extend_count = extend_count + 1, updated_at = now() WHERE id = $1 RETURNING *`, [row.id, minutes]);
+         updated_at = now() WHERE id = $1 RETURNING *`, [row.id, minutes]);
     res.json(map.reservation({ ...row, ...upd }));
   }));
 

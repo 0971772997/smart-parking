@@ -15,6 +15,7 @@ const CATEGORY = {
   near_end: 'reminder', overtime: 'reminder', fee_changed: 'reminder', extended: 'reminder',
   left_slot: 'payment', paid: 'payment', payment_failed: 'payment',
   support_new: 'support', support_reply: 'support', support_status: 'support', review_reply: 'support',
+  announcement: 'support', admin_notice: 'support',
 };
 const CHANNEL = { reservation: 'parking', arrival: 'parking', reminder: 'reminders', payment: 'payment', support: 'parking' };
 // Cac loai duoc day tu may chu (su kien tuc thoi). Loai theo gio / do chinh nguoi dung bam -> chi luu trong app.
@@ -22,7 +23,7 @@ const PUSH_TYPES = new Set([
   'reservation_confirmed', 'reservation_expired', 'slot_changed',
   'session_started', 'parked', 'wrong_slot', 'exited',
   'left_slot', 'paid', 'payment_failed',
-  'support_new', 'support_reply', 'support_status', 'review_reply',
+  'support_new', 'support_reply', 'support_status', 'review_reply', 'announcement', 'admin_notice',
 ]);
 const PREF_KEYS = ['reservation', 'arrival', 'reminder', 'payment', 'support'];
 const prefsOf = (raw) => Object.fromEntries(PREF_KEYS.map((k) => [k, raw?.[k] !== false]));
