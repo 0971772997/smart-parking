@@ -93,8 +93,10 @@ async function onParked(q, lotId, slot, effects) {
   if (resv) {
     await q.query(`UPDATE reservations SET status = 'fulfilled', updated_at = now() WHERE id = $1`, [resv.id]);
     const s = (await q.query(
-      `INSERT INTO parking_sessions (slot_id, reservation_id, user_id, vehicle_id, source, parked_at, planned_end_at)
-       VALUES ($1, $2, $3, $4, 'sensor', now(), now() + make_interval(mins => $5))
+      `INSERT INTO parking_sessions (slot_id, reservation_id, user_id, vehicle_id, source, parked_at, planned_end_at, hourly_rate)
+       VALUES ($1, $2, $3, $4, 'sensor', now(), now() + make_interval(mins => $5),
+               (SELECT LEAST(r.hourly_rate, l.price_per_hour) FROM reservations r, slots sl JOIN parking_lots l ON l.id = sl.lot_id
+                WHERE r.id = $2 AND sl.id = $1))
        ON CONFLICT (reservation_id) WHERE reservation_id IS NOT NULL DO NOTHING RETURNING id`,
       [slot.id, resv.id, resv.user_id, resv.vehicle_id, resv.duration_minutes || 120])).rows[0];
     if (s) {
@@ -107,7 +109,8 @@ async function onParked(q, lotId, slot, effects) {
 
   // 5. Khach vang lai
   await q.query(
-    `INSERT INTO parking_sessions (slot_id, source, parked_at) SELECT $1, 'sensor', now()
+    `INSERT INTO parking_sessions (slot_id, source, parked_at, hourly_rate)
+     SELECT $1, 'sensor', now(), (SELECT l.price_per_hour FROM slots sl JOIN parking_lots l ON l.id = sl.lot_id WHERE sl.id = $1)
      WHERE NOT EXISTS (SELECT 1 FROM parking_sessions WHERE slot_id = $1 AND ended_at IS NULL)`, [slot.id]);
 }
 

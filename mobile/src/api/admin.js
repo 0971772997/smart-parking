@@ -23,6 +23,10 @@ export const adminApi = {
   deleteLot: (id, opts) => request(`/lots/${encodeURIComponent(id)}`, { method: 'DELETE', ...opts }),
   gate: (lotId, gate, action, opts) => request(`/lots/${encodeURIComponent(lotId)}/gates/${gate}/${action}`, { method: 'POST', ...opts }),
 
+  pricing: (lotId, opts) => request(`/admin/pricing${qs({ lotId })}`, opts),
+  /** { lotIds?, mode: percent|amount|set, value, reason?, dryRun?, notify? } */
+  adjustPrice: (body, opts) => request('/admin/pricing', { method: 'POST', body, ...opts }),
+
   reservations: (params, opts) => request(`/admin/reservations${qs(params)}`, opts),
   cancelReservation: (id, reason, opts) => request(`/admin/reservations/${id}/cancel`, { method: 'POST', body: { reason: reason || undefined }, ...opts }),
 

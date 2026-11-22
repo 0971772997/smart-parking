@@ -372,3 +372,21 @@ CREATE TABLE IF NOT EXISTS broadcasts (
   created_by  INT REFERENCES users(id) ON DELETE SET NULL,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- v14: Dieu chinh gia (admin tang / giam gia gui xe)
+-- Gia/gio duoc CHOT: dat cho giu gia luc dat, phien gui xe giu gia luc vao bai
+-- (lay gia thap hon giua luc dat va luc vao) -> doi gia khong anh huong xe dang gui.
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS hourly_rate INT;
+ALTER TABLE parking_sessions ADD COLUMN IF NOT EXISTS hourly_rate INT;
+
+-- Lich su thay doi gia tung bai
+CREATE TABLE IF NOT EXISTS price_changes (
+  id          BIGSERIAL PRIMARY KEY,
+  lot_id      VARCHAR(50) NOT NULL REFERENCES parking_lots(id) ON DELETE CASCADE,
+  old_price   INT NOT NULL,
+  new_price   INT NOT NULL,
+  reason      VARCHAR(200),
+  changed_by  INT REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_price_changes_lot ON price_changes (lot_id, id DESC);

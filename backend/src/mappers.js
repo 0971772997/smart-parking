@@ -34,7 +34,7 @@ const reservation = (r) => {
     id: r.id, code: r.code, lotId: r.lot_id, lotName: r.lot_name, lotAddress: r.lot_address,
     zone: r.zone, slotNumber: r.slot_number, vehicleId: r.vehicle_id, vehiclePlate: r.vehicle_plate ?? null,
     status: r.status, minutes: r.minutes, holdMinutes: r.minutes, durationMinutes: r.duration_minutes,
-    estimatedFee: r.estimated_fee, extendCount: r.extend_count ?? 0, error: r.error,
+    estimatedFee: r.estimated_fee, hourlyRate: r.hourly_rate ?? null, extendCount: r.extend_count ?? 0, error: r.error,
     confirmedAt: r.confirmed_at, expiresAt: r.expires_at, createdAt: r.created_at, updatedAt: r.updated_at,
     enteredAt: r.entered_at ?? null, exitedAt: r.exited_at ?? null, sessionId: r.session_id ?? null,
     nextGate: nextGate(r), // 'entry' | 'exit' | null -> app hien ma QR qua cong tuong ung

@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const { wrap, badRequest, notFound, conflict, HttpError } = require('../errors');
 const v = require('../validate');
 const map = require('../mappers');
+const { setLotPrice } = require('../pricing');
 const { RULES, RESERVATION_SELECT, newCode, estimateFee, expireStale, suspension, zoneSql } = require('../booking');
 const { notify, hhmm } = require('../sessions');
 const { audit } = require('../admin');
@@ -118,10 +119,10 @@ module.exports = function lotRoutes({ db, auth, device }) {
     let resv;
     try {
       resv = await db.one(
-        `INSERT INTO reservations (user_id, slot_id, vehicle_id, minutes, request_id, code, duration_minutes, estimated_fee)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        `INSERT INTO reservations (user_id, slot_id, vehicle_id, minutes, request_id, code, duration_minutes, estimated_fee, hourly_rate)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
         [req.user.id, slot.id, vehicleId, minutes, requestId, newCode(), durationMinutes,
-          estimateFee(lot.price_per_hour, durationMinutes)],
+          estimateFee(lot.price_per_hour, durationMinutes), lot.price_per_hour],
       );
     } catch (e) {
       if (e.code === '23505') throw conflict('slot_not_free', 'O do vua duoc nguoi khac dat');
@@ -201,6 +202,8 @@ module.exports = function lotRoutes({ db, auth, device }) {
         }
         await q.query('DELETE FROM slots WHERE lot_id = $1 AND slot_number > $2', [lot.id, totalSlots]);
       }
+      // Doi gia -> ghi lich su gia (price_changes); xe dang gui giu gia da chot
+      if (pricePerHour != null) await setLotPrice(q, lot.id, pricePerHour, { by: req.user.id, reason: 'Sửa thông tin bãi' });
       return (await q.query(
         `UPDATE parking_lots SET name = COALESCE($2, name), address = CASE WHEN $3::varchar IS NULL THEN address ELSE NULLIF($3::varchar, '') END,
            price_per_hour = COALESCE($4, price_per_hour), total_slots = COALESCE($5, total_slots),

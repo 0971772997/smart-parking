@@ -54,7 +54,7 @@ function createGatePass(secret) {
 // Luot do gan nhat cua dat cho (kem thanh toan) -> de kiem tra cong ra
 async function lastSession(db, reservationId) {
   return db.one(
-    `SELECT ps.*, p.id AS payment_id, l.price_per_hour
+    `SELECT ps.*, p.id AS payment_id, COALESCE(ps.hourly_rate, l.price_per_hour) AS price_per_hour
      FROM parking_sessions ps LEFT JOIN payments p ON p.session_id = ps.id
      JOIN slots s ON s.id = ps.slot_id JOIN parking_lots l ON l.id = s.lot_id
      WHERE ps.reservation_id = $1 ORDER BY ps.started_at DESC LIMIT 1`, [reservationId]);

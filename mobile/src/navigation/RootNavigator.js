@@ -33,6 +33,7 @@ import AdminPaymentsScreen from '../screens/admin/AdminPaymentsScreen';
 import AdminReviewsScreen from '../screens/admin/AdminReviewsScreen';
 import AdminBroadcastScreen from '../screens/admin/AdminBroadcastScreen';
 import AdminAuditScreen from '../screens/admin/AdminAuditScreen';
+import AdminPricingScreen from '../screens/admin/AdminPricingScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -73,6 +74,7 @@ export default function RootNavigator() {
       <Stack.Screen name="AdminPayments" component={AdminPaymentsScreen} options={{ title: 'Doanh thu' }} />
       <Stack.Screen name="AdminReviews" component={AdminReviewsScreen} options={{ title: 'Đánh giá' }} />
       <Stack.Screen name="AdminBroadcast" component={AdminBroadcastScreen} options={{ title: 'Thông báo chung' }} />
+      <Stack.Screen name="AdminPricing" component={AdminPricingScreen} options={{ title: 'Điều chỉnh giá' }} />
       <Stack.Screen name="AdminAudit" component={AdminAuditScreen} options={{ title: 'Nhật ký quản trị' }} />
     </Stack.Navigator>
   );

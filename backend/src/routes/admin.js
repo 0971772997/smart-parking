@@ -4,6 +4,9 @@
 //   GET   /users/:id                       chi tiet: xe, dat cho, phien, giao dich, yeu cau ho tro gan day
 //   PATCH /users/:id                       { fullName?, phone?, role?, locked?, lockedReason?, resetNoShows? }
 //   GET   /lots                            bai do + cho trong / dang gui / doanh thu hom nay / danh gia
+//   GET   /pricing?lotId=                  gia hien tai tung bai + lich su doi gia
+//   POST  /pricing                         tang / giam gia { lotIds? (bo trong = tat ca), mode: percent|amount|set,
+//                                          value, reason?, dryRun? (xem truoc), notify? (bao tai xe lien quan) }
 //   GET   /reservations?status=&lotId=&q=&from=&to=   dat cho cua moi tai xe
 //   POST  /reservations/:id/cancel         huy dat cho (thiet bi mat ket noi -> huy tren he thong)
 //   GET   /sessions?state=active|unpaid|completed|all&lotId=&q=&from=&to=
@@ -18,7 +21,8 @@ const express = require('express');
 const { wrap, badRequest, notFound, conflict } = require('../errors');
 const v = require('../validate');
 const map = require('../mappers');
-const { RESERVATION_SELECT, expireStale } = require('../booking');
+const { RESERVATION_SELECT, expireStale, RULES } = require('../booking');
+const pricing = require('../pricing');
 const { SESSION_SELECT, ACTIVE_WHERE, sessionView, closeSession, notify, vnd } = require('../sessions');
 const { PAYMENT_SELECT, paymentView } = require('../payments');
 const { REVIEW_TAGS, displayName } = require('../feedback');
@@ -53,6 +57,13 @@ module.exports = function adminRoutes({ db, auth, device, publicUrl, receiptSecr
   const r = express.Router();
   r.use(auth.requireAuth, auth.requireAdmin);
   const payView = (p) => paymentView(p, { publicUrl, secret: receiptSecret });
+  // Tai xe lien quan toi 1 bai (chua bi khoa): yeu thich / tung dat cho / tung gui xe. lotId null = tat ca tai xe
+  const audienceOf = async (lotId) => (await db.query(
+    `SELECT u.id FROM users u WHERE u.role = 'user' AND u.locked_at IS NULL AND ($1::text IS NULL
+       OR EXISTS (SELECT 1 FROM favorite_lots f WHERE f.user_id = u.id AND f.lot_id = $1)
+       OR EXISTS (SELECT 1 FROM reservations r JOIN slots s ON s.id = r.slot_id WHERE r.user_id = u.id AND s.lot_id = $1)
+       OR EXISTS (SELECT 1 FROM parking_sessions ps JOIN slots s ON s.id = ps.slot_id WHERE ps.user_id = u.id AND s.lot_id = $1))`,
+    [lotId])).rows;
   const page = (q) => ({
     limit: v.int(q, 'limit', { min: 1, max: PAGE_MAX, def: 30 }),
     offset: v.int(q, 'offset', { min: 0, max: 1000000, def: 0 }),
@@ -221,6 +232,83 @@ module.exports = function adminRoutes({ db, auth, device, publicUrl, receiptSecr
       LEFT JOIN LATERAL (SELECT AVG(rating) AS rating_avg, COUNT(*) AS rating_count FROM lot_reviews WHERE lot_id = l.id) rv ON true
       GROUP BY l.id, rv.rating_avg, rv.rating_count ORDER BY l.name`, [today]);
     res.json(rows.map((l) => ({ ...map.lot(l), occupied: l.occupied, reserved: l.reserved, revenueToday: l.revenue_today, carsInLot: l.cars })));
+  }));
+
+  // ---------- Gia gui xe ----------
+  r.get('/pricing', wrap(async (req, res) => {
+    const lotId = req.query.lotId ? String(req.query.lotId) : null;
+    const lots = (await db.query(`
+      SELECT l.id, l.name, l.price_per_hour, l.booking_enabled, l.online,
+             (SELECT COUNT(*) FROM parking_sessions ps JOIN slots x ON x.id = ps.slot_id WHERE x.lot_id = l.id AND ps.ended_at IS NULL)::int AS open_sessions,
+             (SELECT COUNT(*) FROM reservations r JOIN slots x ON x.id = r.slot_id WHERE x.lot_id = l.id AND r.status IN ('pending', 'active'))::int AS open_reservations,
+             (SELECT MAX(created_at) FROM price_changes pc WHERE pc.lot_id = l.id) AS last_changed_at
+      FROM parking_lots l ORDER BY l.name`)).rows;
+    const history = (await db.query(`
+      SELECT pc.*, l.name AS lot_name, u.full_name AS by_name, u.email AS by_email
+      FROM price_changes pc JOIN parking_lots l ON l.id = pc.lot_id LEFT JOIN users u ON u.id = pc.changed_by
+      WHERE ($1::text IS NULL OR pc.lot_id = $1) ORDER BY pc.id DESC LIMIT 50`, [lotId])).rows;
+    res.json({
+      lots: lots.map((l) => ({ id: l.id, name: l.name, pricePerHour: l.price_per_hour, bookingEnabled: l.booking_enabled,
+        online: l.online, openSessions: l.open_sessions, openReservations: l.open_reservations, lastChangedAt: l.last_changed_at })),
+      history: history.map(pricing.changeView),
+      rules: { roundTo: pricing.ROUND_TO, maxPrice: pricing.MAX_PRICE, limits: pricing.LIMITS,
+        overtimeRate: RULES.session.overtimeRate, overtimeGraceMinutes: RULES.session.overtimeGraceMinutes },
+    });
+  }));
+
+  r.post('/pricing', wrap(async (req, res) => {
+    const { mode, value } = pricing.parseAdjustment(req.body);
+    const reason = v.str(req.body, 'reason', { max: 200, optional: true }) || null;
+    const dryRun = req.body?.dryRun === true;
+    const wantNotify = req.body?.notify === true;
+    let ids = req.body?.lotIds;
+    if (ids !== undefined && ids !== null) {
+      if (!Array.isArray(ids) || !ids.length || ids.length > 100 || ids.some((x) => typeof x !== 'string' || !x || x.length > 50)) {
+        throw badRequest('validation_error', "'lotIds' phai la danh sach ma bai (1-100)");
+      }
+      ids = [...new Set(ids)];
+    } else ids = null;
+    const lots = (await db.query(
+      'SELECT id, name, price_per_hour FROM parking_lots WHERE ($1::text[] IS NULL OR id = ANY($1)) ORDER BY id', [ids])).rows;
+    if (ids && lots.length !== ids.length) {
+      const missing = ids.filter((id) => !lots.some((l) => l.id === id));
+      throw Object.assign(notFound('lot_not_found', 'Khong tim thay bai do'), { details: { lotIds: missing } });
+    }
+    const view = (c) => ({ lotId: c.lotId, name: c.name, oldPrice: c.oldPrice, newPrice: c.newPrice, diff: c.newPrice - c.oldPrice,
+      percent: c.oldPrice > 0 ? Math.round(((c.newPrice - c.oldPrice) / c.oldPrice) * 1000) / 10 : null });
+    if (dryRun) {
+      const changes = lots.map((l) => ({ lotId: l.id, name: l.name, oldPrice: l.price_per_hour, newPrice: pricing.adjustPrice(l.price_per_hour, mode, value) }))
+        .filter((c) => c.newPrice !== c.oldPrice);
+      return res.json({ applied: false, mode, value, changes: changes.map(view), unchanged: lots.length - changes.length, notified: 0 });
+    }
+    // Ap dung trong 1 transaction, khoa tung bai (theo thu tu id): 2 admin bam cung luc -> lan sau tinh tren gia moi nhat
+    const changes = await db.tx(async (q) => {
+      const out = [];
+      for (const l of lots) {
+        const c = await pricing.setLotPrice(q, l.id, (old) => pricing.adjustPrice(old, mode, value), { by: req.user.id, reason });
+        if (c) out.push(c);
+      }
+      return out;
+    });
+    let notified = 0;
+    if (wantNotify) {
+      for (const c of changes) {
+        const up = c.newPrice > c.oldPrice;
+        const title = `${c.name} ${up ? 'tăng' : 'giảm'} giá gửi xe`;
+        const body = `Giá mới ${vnd(c.newPrice)}/giờ (trước đây ${vnd(c.oldPrice)}/giờ), áp dụng cho lượt đặt chỗ và gửi xe mới. Xe đang gửi giữ nguyên giá cũ.`
+          + (reason ? ` Lý do: ${reason}` : '');
+        for (const u of await audienceOf(c.lotId)) {
+          const n = await notify(db, { userId: u.id, type: 'announcement', key: `price${c.id}:${u.id}`, title, body,
+            data: { lotId: c.lotId, oldPrice: c.oldPrice, newPrice: c.newPrice } });
+          if (n) notified += 1;
+        }
+      }
+    }
+    if (changes.length) {
+      await audit(db, req, 'lot.price', 'lot', changes.length === 1 ? changes[0].lotId : null,
+        { mode, value, reason, notified, changes: changes.map((c) => ({ lotId: c.lotId, oldPrice: c.oldPrice, newPrice: c.newPrice })) });
+    }
+    res.json({ applied: true, mode, value, changes: changes.map(view), unchanged: lots.length - changes.length, notified });
   }));
 
   // ---------- Dat cho ----------
@@ -397,13 +485,7 @@ module.exports = function adminRoutes({ db, auth, device, publicUrl, receiptSecr
       lotId = audience.slice(4);
       if (!(await db.one('SELECT 1 FROM parking_lots WHERE id = $1', [lotId]))) throw notFound('lot_not_found', 'Khong tim thay bai do');
     }
-    // Nguoi nhan: tai xe chua bi khoa; theo bai = tung gui xe / dat cho / yeu thich bai do
-    const { rows } = await db.query(
-      `SELECT u.id FROM users u WHERE u.role = 'user' AND u.locked_at IS NULL AND ($1::text IS NULL
-         OR EXISTS (SELECT 1 FROM favorite_lots f WHERE f.user_id = u.id AND f.lot_id = $1)
-         OR EXISTS (SELECT 1 FROM reservations r JOIN slots s ON s.id = r.slot_id WHERE r.user_id = u.id AND s.lot_id = $1)
-         OR EXISTS (SELECT 1 FROM parking_sessions ps JOIN slots s ON s.id = ps.slot_id WHERE ps.user_id = u.id AND s.lot_id = $1))`,
-      [lotId]);
+    const rows = await audienceOf(lotId);
     const b = await db.one(
       'INSERT INTO broadcasts (title, body, audience, recipients, created_by) VALUES ($1, $2, $3, $4, $5) RETURNING *',
       [title, body, audience, rows.length, req.user.id]);

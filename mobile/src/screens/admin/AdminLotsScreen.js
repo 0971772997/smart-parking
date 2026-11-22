@@ -123,6 +123,7 @@ export default function AdminLotsScreen({ navigation, route }) {
                 <SmallButton icon="create-outline" label="Sửa" onPress={() => setForm({
                   mode: 'edit', id: l.id, name: l.name, address: l.address || '', pricePerHour: String(l.pricePerHour), totalSlots: String(l.totalSlots),
                 })} />
+                <SmallButton icon="pricetags-outline" label="Giá" onPress={() => navigation.navigate('AdminPricing', { lotId: l.id })} />
                 <SmallButton icon={l.bookingEnabled ? 'pause' : 'play'} label={l.bookingEnabled ? 'Ngưng đặt chỗ' : 'Mở đặt chỗ'}
                   tone={l.bookingEnabled ? 'muted' : 'success'} loading={busy === `${l.id}:booking`} onPress={() => toggleBooking(l)} />
                 <SmallButton icon="grid-outline" label="Sơ đồ" onPress={() => navigation.navigate('SetupParkingLot', { lotId: l.id })} />

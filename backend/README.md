@@ -51,7 +51,7 @@ Node.js + Express · PostgreSQL (Neon) · MQTT (broker HiveMQ công khai) · Dep
 
 Quan hệ: `users 1–n vehicles`, `users 1–n reservations`, `parking_lots 1–n slots`, `slots 1–n reservations`, `slots 1–n parking_sessions`, `reservations 1–0..1 parking_sessions`, `parking_sessions 1–0..1 payments`, `users 1–n payments`, `users 1–n parking_schedules`, `parking_lots 1–n device_events`.
 
-Phí đỗ được tính tròn lên theo giờ, tối thiểu 1 giờ, nhân với `price_per_hour` của bãi.
+Phí đỗ được tính tròn lên theo giờ, tối thiểu 1 giờ, nhân với giá/giờ **đã chốt** của lượt gửi (`hourly_rate`): đặt chỗ lưu giá lúc đặt, lượt gửi lấy giá thấp hơn giữa lúc đặt và lúc vào bãi; khách vãng lai lấy giá lúc xe vào ô. Admin đổi giá chỉ áp dụng cho lượt mới (lượt cũ chưa có `hourly_rate` dùng giá hiện tại của bãi).
 
 **Luồng thanh toán:** đặt chỗ → xe vào ô (ESP32 báo `slot_changed`) → mở lượt đỗ → xe ra → server tính `fee` → lượt đỗ ở trạng thái *chưa thanh toán* → tài xế trả qua app (`POST /sessions/:id/pay`) hoặc admin thu tiền mặt tại cổng → tạo giao dịch. Cổng thanh toán hiện là **giả lập** (trả về thành công ngay); điểm gắn cổng thật (MoMo/VNPay…) là hàm `pay()` trong `src/routes/payments.js`.
 
@@ -128,6 +128,7 @@ Có thể thử API bằng tay qua file `api.http` (extension **REST Client** tr
 - `GET /api/admin/overview?days=7|30` – doanh thu hôm nay, chuỗi doanh thu theo ngày, ô/xe trong bãi, việc cần xử lý (sự cố mở, phiên chưa thanh toán, đánh giá chưa phản hồi), tình trạng từng bãi.
 - Người dùng: `GET /api/admin/users?q=&role=&status=locked`, `GET|PATCH /api/admin/users/:id` (`locked`, `lockedReason`, `role`, `resetNoShows`). Khoá / đổi quyền **có hiệu lực ngay** (middleware kiểm tra tài khoản mỗi request, cache 30s) – không tự khoá / tự hạ quyền mình.
 - Bãi đỗ: `POST /api/lots`, `PUT /api/lots/:id` (tên, địa chỉ, giá, số ô, `bookingEnabled`), `DELETE /api/lots/:id` (chỉ bãi chưa có lịch sử), `GET /api/admin/lots`.
+- Điều chỉnh giá: `GET /api/admin/pricing?lotId=` (giá từng bãi, số xe đang gửi, lịch sử `price_changes`), `POST /api/admin/pricing {lotIds?, mode: percent|amount|set, value, reason?, dryRun?, notify?}` – tăng/giảm theo % (−90…+500) hoặc số tiền, hoặc đặt giá mới; làm tròn 1.000đ, giới hạn 0…10.000.000đ; khoá từng bãi trong transaction (2 admin bấm cùng lúc không mất lần nào); `notify` gửi thông báo cho tài xế yêu thích / từng gửi ở bãi. Sửa giá qua `PUT /api/lots/:id` cũng ghi lịch sử.
 - `GET /api/admin/reservations`, `POST /api/admin/reservations/:id/cancel`; `GET /api/admin/sessions?state=active|unpaid|completed|all`, `POST /api/admin/sessions/:id/close {note, waive}`; `GET /api/admin/payments` (tổng + theo phương thức); `GET|DELETE /api/admin/reviews`; `POST /api/admin/broadcast {title, body, audience: all|lot:<id>}`; `GET /api/admin/audit` (nhật ký mọi thao tác quản trị).
 
 ### Lịch sử, yêu thích, đánh giá, hỗ trợ (`routes/history.js`, `routes/feedback.js`, `routes/support.js`)
@@ -142,7 +143,7 @@ Có thể thử API bằng tay qua file `api.http` (extension **REST Client** tr
 npm install
 npm run migrate      # tạo bảng và dữ liệu mẫu (bãi sp-demo-01, 4 ô)
 npm run dev          # http://localhost:3000
-npm test             # 273 test (đơn vị + tích hợp + E2E + bảo mật + tải đồng thời), nhánh DB Neon "test" (.env.test), ESP32 giả lập
+npm test             # 290 test (đơn vị + tích hợp + E2E + bảo mật + tải đồng thời), nhánh DB Neon "test" (.env.test), ESP32 giả lập
 npm run test:unit    # chỉ test đơn vị (không cần DB, vài giây) – xem các lệnh khác + kết quả trong docs/KIEM_THU.md
 npm run perf         # đo hiệu năng (p50/p95/p99, đột biến 50 kết nối, 500 long-poll)
 node scripts/e2e.js http://localhost:3000 <admin-email> <admin-pass>   # test thật với ESP32/Wokwi qua MQTT

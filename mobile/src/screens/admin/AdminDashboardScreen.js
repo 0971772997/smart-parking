@@ -17,6 +17,7 @@ import { timeAgo } from '../../utils/session';
 const SECTIONS = [
   { screen: 'AdminUsers', icon: 'people', label: 'Người dùng', color: '#2563EB' },
   { screen: 'AdminLots', icon: 'business', label: 'Bãi đỗ & thiết bị', color: '#0E7490' },
+  { screen: 'AdminPricing', icon: 'pricetags', label: 'Điều chỉnh giá', color: '#059669' },
   { screen: 'AdminReservations', icon: 'ticket', label: 'Đặt chỗ', color: '#7C3AED' },
   { screen: 'AdminSessions', icon: 'car-sport', label: 'Phiên gửi xe', color: '#16A34A' },
   { screen: 'AdminPayments', icon: 'cash', label: 'Doanh thu & giao dịch', color: '#B45309' },

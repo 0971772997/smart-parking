@@ -19,7 +19,7 @@ const MIN = 60 * 1000;
 
 const SESSION_SELECT = `
   SELECT ps.*, s.slot_number, s.zone, s.lot_id, l.name AS lot_name, l.address AS lot_address,
-         l.price_per_hour, l.online,
+         COALESCE(ps.hourly_rate, l.price_per_hour) AS price_per_hour, l.price_per_hour AS lot_price_per_hour, l.online,
          r.code AS reservation_code, r.duration_minutes, COALESCE(ps.user_id, r.user_id) AS owner_id,
          veh.plate_number AS vehicle_plate,
          p.id AS payment_id, p.code AS payment_code, p.method AS payment_method, p.amount AS payment_amount,
@@ -75,7 +75,7 @@ const phaseOf = (s) => {
 // Chot phi cho phien (xe roi o / ra cong khi chua do). q: db hoac client trong transaction
 async function closeSession(q, sessionId, endAt = Date.now()) {
   const s = (await q.query(
-    `SELECT ps.*, l.price_per_hour FROM parking_sessions ps JOIN slots sl ON sl.id = ps.slot_id
+    `SELECT ps.*, COALESCE(ps.hourly_rate, l.price_per_hour) AS price_per_hour FROM parking_sessions ps JOIN slots sl ON sl.id = ps.slot_id
      JOIN parking_lots l ON l.id = sl.lot_id WHERE ps.id = $1 AND ps.ended_at IS NULL FOR UPDATE OF ps`, [sessionId])).rows[0];
   if (!s) return null;
   const fee = sessionFee({ startedAt: s.started_at, endAt, pricePerHour: s.price_per_hour,
@@ -103,10 +103,11 @@ const hhmm = (d) => new Date(ms(d) + 7 * HOUR).toISOString().slice(11, 16); // g
 // Barie cong vao da mo cho dat cho -> mo phien gui xe (idempotent: 1 dat cho chi 1 phien)
 async function startGateSession(q, reservationId) {
   const { rows } = await q.query(
-    `INSERT INTO parking_sessions (slot_id, reservation_id, user_id, vehicle_id, source, started_at, planned_end_at)
+    `INSERT INTO parking_sessions (slot_id, reservation_id, user_id, vehicle_id, source, started_at, planned_end_at, hourly_rate)
      SELECT r.slot_id, r.id, r.user_id, r.vehicle_id, 'gate', COALESCE(r.entered_at, now()),
-            COALESCE(r.entered_at, now()) + make_interval(mins => COALESCE(r.duration_minutes, 120))
-     FROM reservations r WHERE r.id = $1
+            COALESCE(r.entered_at, now()) + make_interval(mins => COALESCE(r.duration_minutes, 120)),
+            LEAST(r.hourly_rate, l.price_per_hour)
+     FROM reservations r JOIN slots sl ON sl.id = r.slot_id JOIN parking_lots l ON l.id = sl.lot_id WHERE r.id = $1
      ON CONFLICT (reservation_id) WHERE reservation_id IS NOT NULL DO NOTHING
      RETURNING *`, [reservationId]);
   const s = rows[0];

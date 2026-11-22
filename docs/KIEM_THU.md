@@ -21,7 +21,7 @@ Các nhóm test chính: đăng ký/đăng nhập, phân quyền, đặt chỗ (t
 | Lệnh (`backend/`) | Nhóm | Nội dung chính |
 |---|---|---|
 | `npm run test:unit` | **Đơn vị** (không cần DB) | Tính phí (bảng 10 trường hợp, phí không giảm theo thời gian, khớp phí dự kiến), vòng đời phiên; JWT (thiếu / sai khoá / hết hạn / `alg: none` / sửa payload / bị khoá / đổi quyền / cache); mã QR cổng (sửa từng phần, hết hạn, khoá khác); chữ ký MoMo; giới hạn đăng nhập; kiểm tra dữ liệu vào (nhầm kiểu, ngày, SĐT); MQTT (ack, timeout, mất broker); long-poll; thông báo đẩy khi mạng lỗi; API khi CSDL mất kết nối |
-| `npm run test:integration` | **Tích hợp API** (DB `test`) | Toàn bộ API theo chức năng: xác thực, đặt chỗ, QR cổng, phiên gửi xe, thanh toán MoMo, thông báo đẩy, lịch sử / yêu thích / đánh giá / hỗ trợ, quản trị |
+| `npm run test:integration` | **Tích hợp API** (DB `test`) | Toàn bộ API theo chức năng: xác thực, đặt chỗ, QR cổng, phiên gửi xe, thanh toán MoMo, thông báo đẩy, lịch sử / yêu thích / đánh giá / hỗ trợ, quản trị, điều chỉnh giá (giá đã chốt cho xe đang gửi, 2 admin bấm cùng lúc, thông báo tài xế) |
 | `npm run test:e2e` | **Đầu cuối** (server HTTP thật) | Đặt chỗ → QR vào → xe vào ô → gia hạn → rời ô (chốt phí) → MoMo (IPN ký thật) → biên nhận → QR ra → kết thúc → lịch sử / đánh giá / doanh thu; thanh toán bị từ chối rồi trả lại; MoMo mất kết nối; ESP32 không phản hồi; bãi offline; huỷ / không đến; app mất mạng khi long-poll |
 | `npm run test:security` | **Phân quyền & bảo mật** | Truy cập chéo 18 API (B đụng tài nguyên A → 404, dữ liệu A không đổi); 26 API quản trị (khách 401, tài xế 403); token thật (hết hạn, khoá giả, tự gán admin, tài khoản xoá / khoá); dò mật khẩu → 429; không lộ hash / email; chèn SQL, ký tự đại diện LIKE; mass assignment; nhầm kiểu dữ liệu |
 | `npm run test:load` | **Tải đồng thời** | 10 người tranh 1 ô; bấm đặt chỗ 5 lần; 8 IPN cùng lúc; yêu thích / đánh giá trùng; gia hạn phiên / giữ chỗ vượt giới hạn |
@@ -33,9 +33,9 @@ Các nhóm test chính: đăng ký/đăng nhập, phân quyền, đặt chỗ (t
 
 | Nhóm | Kết quả |
 |---|---|
-| Backend – toàn bộ (`npm test`: đơn vị + tích hợp + E2E + bảo mật + tải đồng thời) | **273/273 PASS** (55 nhóm, khoảng 2,5 phút) |
+| Backend – toàn bộ (`npm test`: đơn vị + tích hợp + E2E + bảo mật + tải đồng thời) | **290/290 PASS** (60 nhóm, khoảng 2,5 phút) |
 | Độ phủ mã nguồn backend (`npm run test:coverage`) | **98,8 % dòng lệnh**, 85,9 % nhánh, 95,4 % hàm |
-| App (`mobile/ npm test`) | **31/31 PASS** |
+| App (`mobile/ npm test`) | **35/35 PASS** |
 | `npx expo-doctor` | 20/20 kiểm tra đạt |
 
 **Lỗi tìm ra nhờ kiểm thử (đã sửa):**
