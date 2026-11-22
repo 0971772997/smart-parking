@@ -168,6 +168,8 @@ export default function SessionDetailScreen({ navigation, route }) {
   const overtime = open && toEnd !== null && toEnd < 0;
   const nearEnd = open && toEnd !== null && toEnd >= 0 && toEnd <= 15 * 60;
   const showPass = s.reservationId && s.phase !== 'completed';
+  // So gio tinh phi: dang gui -> tu may chu; da chot -> phi gui / gia
+  const baseHours = open ? s.cost.hours : s.pricePerHour && s.cost.base ? Math.round(s.cost.base / s.pricePerHour) : null;
   const passResv = { id: s.reservationId, nextGate: 'exit', enteredAt: s.startedAt, slotNumber: s.slotNumber };
 
   return (
@@ -300,7 +302,7 @@ export default function SessionDetailScreen({ navigation, route }) {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Chi phí {open ? '(tạm tính)' : '(đã chốt)'}</Text>
             <Info icon="pricetag-outline" label="Giá" value={`${formatVND(s.pricePerHour)}/giờ`} />
-            <Info icon="time-outline" label={open && s.cost.hours ? `Phí gửi (${s.cost.hours} giờ)` : 'Phí gửi'} value={formatVND(s.cost.base)} />
+            <Info icon="time-outline" label={baseHours ? `Phí gửi (${baseHours} giờ × ${formatVND(s.pricePerHour)})` : 'Phí gửi'} value={formatVND(s.cost.base)} />
             {s.cost.overtime ? <Info icon="warning-outline" label="Phụ phí quá giờ" value={formatVND(s.cost.overtime)} danger /> : null}
             <View style={styles.divider} />
             <Info icon="cash-outline" label="Tổng" value={formatVND(s.cost.total)} strong />
@@ -350,6 +352,21 @@ export default function SessionDetailScreen({ navigation, route }) {
               })}
             </View>
           ) : null}
+
+          {/* DANH GIA + HO TRO */}
+          <View style={styles.helpRow}>
+            {s.phase === 'left' || s.phase === 'completed' ? (
+              <Pressable onPress={() => navigation.navigate('ReviewForm', { lotId: s.lotId, lotName: s.lotName })} style={styles.helpBtn} accessibilityRole="button">
+                <Ionicons name="star-outline" size={16} color="#B45309" />
+                <Text style={[styles.helpText, { color: '#B45309' }]}>Đánh giá bãi đỗ</Text>
+              </Pressable>
+            ) : null}
+            <Pressable onPress={() => navigation.navigate('SupportTicketForm', { kind: 'incident', sessionId: s.id, lotId: s.lotId, slotNumber: s.slotNumber })}
+              style={styles.helpBtn} accessibilityRole="button">
+              <Ionicons name="warning-outline" size={16} color={colors.danger} />
+              <Text style={[styles.helpText, { color: colors.danger }]}>Báo cáo sự cố</Text>
+            </Pressable>
+          </View>
 
           {s.reservationId ? (
             <Pressable onPress={() => navigation.navigate('ReservationDetail', { id: s.reservationId })} style={styles.link}>
@@ -456,4 +473,7 @@ const styles = StyleSheet.create({
   receiptBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 42, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.primary, marginTop: 10 },
   receiptBtnText: { color: colors.primary, fontWeight: '800', fontSize: 13.5 },
   linkText: { color: colors.primary, fontWeight: '700', fontSize: 13.5 },
+  helpRow: { flexDirection: 'row', gap: 10, marginBottom: 4 },
+  helpBtn: { flex: 1, flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center', height: 44, borderRadius: radius.md, backgroundColor: '#fff', borderWidth: 1, borderColor: '#EEF2F7' },
+  helpText: { fontSize: 13.5, fontWeight: '800' },
 });

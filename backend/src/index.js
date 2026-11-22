@@ -5,6 +5,7 @@ const { createAuth } = require('./auth');
 const { createSync } = require('./sync');
 const { createLiveHub } = require('./live');
 const { createMomoGateway } = require('./paymentGateway');
+const { createPushService } = require('./push');
 const { createMqttBridge } = require('./mqttBridge');
 const { createApp } = require('./app');
 const { createSocialVerifier } = require('./social');
@@ -32,7 +33,8 @@ async function main() {
   const app = createApp({ db, auth: createAuth(config), device, otpDevMode: config.otpDevMode,
     social: createSocialVerifier(config.social), gatePass: createGatePass(config.jwtSecret), live,
     gateway: createMomoGateway(config.payments.momo), publicUrl: config.publicUrl, receiptSecret: config.jwtSecret,
-    allowMockPayments: config.payments.allowMock });
+    allowMockPayments: config.payments.allowMock,
+    push: createPushService({ db, accessToken: process.env.EXPO_ACCESS_TOKEN || undefined }) });
 
   const server = app.listen(config.port, () => console.log(`[API] Dang chay tai cong ${config.port}`));
 

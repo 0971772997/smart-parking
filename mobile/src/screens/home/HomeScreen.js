@@ -27,6 +27,7 @@ import { reservationsApi } from '../../api/reservations';
 import { vehiclesApi } from '../../api/vehicles';
 import { authApi } from '../../api/auth';
 import { sessionsApi } from '../../api/sessions';
+import { favoritesApi } from '../../api/feedback';
 import { useLive, useOnLiveChange } from '../../context/LiveContext';
 import OfflineBanner from '../../components/OfflineBanner';
 import ActiveSessionCard from '../../components/ActiveSessionCard';
@@ -112,6 +113,8 @@ export default function HomeScreen({ navigation }) {
   const [lots, setLots] = useState([]);
   const [reservations, setReservations] = useState([]);
   const [vehicles, setVehicles] = useState([]);
+  const [favIds, setFavIds] = useState(() => new Set()); // bai do yeu thich
+  const [favBusy, setFavBusy] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -140,16 +143,18 @@ export default function HomeScreen({ navigation }) {
   const loadData = useCallback(async (isSilent = false) => {
     if (!isSilent) setLoading(true);
     try {
-      const [lotsRes, resvRes, vehRes, sesRes] = await Promise.allSettled([
+      const [lotsRes, resvRes, vehRes, sesRes, favRes] = await Promise.allSettled([
         lotsApi.list(),
         reservationsApi.list(),
         vehiclesApi.list(),
         sessionsApi.active(),
+        favoritesApi.list(),
       ]);
       if (lotsRes.status === 'fulfilled') setLots(lotsRes.value || []);
       if (resvRes.status === 'fulfilled') setReservations(resvRes.value || []);
       if (vehRes.status === 'fulfilled') setVehicles(vehRes.value || []);
       if (sesRes.status === 'fulfilled') setActiveSession(sesRes.value?.session || null);
+      if (favRes.status === 'fulfilled') setFavIds(new Set((favRes.value || []).map((l) => l.id)));
     } catch {
       // bỏ qua lỗi im lặng nếu có
     } finally {
@@ -219,6 +224,23 @@ export default function HomeScreen({ navigation }) {
     Linking.openURL(url).catch(() => {
       Alert.alert('Chỉ đường', `Địa chỉ bãi đỗ: ${lot.address || lot.name}`);
     });
+  };
+
+  // Them / bo bai do yeu thich (cap nhat ngay tren man hinh, loi -> tra lai nhu cu)
+  const handleToggleFavorite = async (lot) => {
+    if (favBusy) return;
+    const was = favIds.has(lot.id);
+    const flip = (on) => setFavIds((cur) => { const n = new Set(cur); if (on) n.add(lot.id); else n.delete(lot.id); return n; });
+    flip(!was);
+    setFavBusy(lot.id);
+    try {
+      if (was) await favoritesApi.remove(lot.id); else await favoritesApi.add(lot.id);
+    } catch (e) {
+      flip(was);
+      Alert.alert('Yêu thích', e.message || 'Không cập nhật được danh sách yêu thích.');
+    } finally {
+      setFavBusy(null);
+    }
   };
 
   // Thêm xe mới
@@ -316,6 +338,8 @@ export default function HomeScreen({ navigation }) {
       result = result.filter((l) => (l.freeSlots || 0) > 0);
     } else if (filterFeature === 'ev') {
       result = result.filter((l) => l.features.includes('Sạc điện EV'));
+    } else if (filterFeature === 'fav') {
+      result = result.filter((l) => favIds.has(l.id));
     } else if (filterFeature === 'roof') {
       result = result.filter((l) => l.features.includes('Mái che'));
     }
@@ -330,7 +354,7 @@ export default function HomeScreen({ navigation }) {
     }
 
     return result;
-  }, [enhancedLots, searchQuery, filterFeature, sortBy]);
+  }, [enhancedLots, searchQuery, filterFeature, sortBy, favIds]);
 
   // Vé đang hiệu lực
   const activeReservation = useMemo(() => {
@@ -508,6 +532,9 @@ export default function HomeScreen({ navigation }) {
                     onDirections={handleOpenDirections}
                     onViewMap={(lot) => navigation.navigate('SetupParkingLot', { lotId: lot.id })}
                     onBook={(lot) => navigation.navigate('Booking', { lotId: lot.id })}
+                    favIds={favIds}
+                    onToggleFavorite={handleToggleFavorite}
+                    onReviews={(lot) => navigation.navigate('LotReviews', { lotId: lot.id, lotName: lot.name })}
                   />
                 )}
 
@@ -516,6 +543,7 @@ export default function HomeScreen({ navigation }) {
                     reservations={reservations}
                     lots={lots}
                     onOpenDetail={(r) => navigation.navigate('ReservationDetail', { id: r.id, initial: r })}
+                    onHistory={() => navigation.navigate('History')}
                   />
                 )}
 
@@ -536,6 +564,7 @@ export default function HomeScreen({ navigation }) {
                     }}
                     onLogout={handleLogout}
                     onTransactions={() => navigation.navigate('Transactions')}
+                    onNavigate={(name) => navigation.navigate(name)}
                   />
                 )}
               </>
@@ -772,6 +801,9 @@ function LotsTabSection({
   onDirections,
   onViewMap,
   onBook,
+  favIds,
+  onToggleFavorite,
+  onReviews,
 }) {
   return (
     <View style={styles.sectionWrap}>
@@ -812,6 +844,16 @@ function LotsTabSection({
             <Ionicons name="pricetag" size={12} color={sortBy === 'price' ? '#2563EB' : colors.textMuted} />
             <Text style={[styles.filterChipText, sortBy === 'price' && styles.filterChipTextActive]}>
               Giá rẻ nhất
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() => setFilterFeature(filterFeature === 'fav' ? 'all' : 'fav')}
+            style={[styles.filterChip, filterFeature === 'fav' && styles.filterChipActive]}
+          >
+            <Ionicons name="heart" size={12} color={filterFeature === 'fav' ? '#E11D48' : colors.textMuted} />
+            <Text style={[styles.filterChipText, filterFeature === 'fav' && styles.filterChipTextActive]}>
+              Yêu thích{favIds.size ? ` (${favIds.size})` : ''}
             </Text>
           </Pressable>
 
@@ -895,7 +937,7 @@ function LotsTabSection({
               <View style={styles.lotCardHeader}>
                 <View style={{ flex: 1 }}>
                   <View style={styles.lotNameRow}>
-                    <Text style={styles.lotNameText}>{lot.name}</Text>
+                    <Text style={styles.lotNameText} numberOfLines={1}>{lot.name}</Text>
                     <View style={[styles.iotBadge, lot.online ? styles.iotOnline : styles.iotOffline]}>
                       <Text style={[styles.iotText, lot.online ? styles.iotTextOnline : styles.iotTextOffline]}>
                         {lot.online ? 'Online' : 'Offline'}
@@ -903,6 +945,16 @@ function LotsTabSection({
                     </View>
                   </View>
                   {lot.address ? <Text style={styles.lotAddressText}>{lot.address}</Text> : null}
+
+                  {/* DANH GIA (bam -> xem / viet danh gia) */}
+                  <Pressable onPress={() => onReviews(lot)} style={styles.lotRatingRow} hitSlop={6} accessibilityRole="button"
+                    accessibilityLabel={`Đánh giá ${lot.name}`}>
+                    <Ionicons name="star" size={12} color={lot.rating?.count ? '#F59E0B' : '#CBD5E1'} />
+                    <Text style={styles.lotRatingText}>
+                      {lot.rating?.count ? `${lot.rating.average.toFixed(1)} • ${lot.rating.count} đánh giá` : 'Chưa có đánh giá'}
+                    </Text>
+                    <Ionicons name="chevron-forward" size={11} color={colors.textMuted} />
+                  </Pressable>
 
                   {/* KHOẢNG CÁCH & GIỜ HOẠT ĐỘNG */}
                   <View style={styles.metaRow}>
@@ -921,6 +973,11 @@ function LotsTabSection({
                 <View style={styles.lotPriceTag}>
                   <Text style={styles.lotPriceText}>{formatVND(lot.pricePerHour)}</Text>
                   <Text style={styles.lotPriceUnit}>/giờ</Text>
+                  <Pressable onPress={() => onToggleFavorite(lot)} style={[styles.favBtn, favIds.has(lot.id) && styles.favBtnOn]} hitSlop={8}
+                    accessibilityRole="button" accessibilityState={{ selected: favIds.has(lot.id) }}
+                    accessibilityLabel={favIds.has(lot.id) ? `Bỏ yêu thích ${lot.name}` : `Thêm ${lot.name} vào yêu thích`}>
+                    <Ionicons name={favIds.has(lot.id) ? 'heart' : 'heart-outline'} size={17} color={favIds.has(lot.id) ? '#E11D48' : colors.textMuted} />
+                  </Pressable>
                 </View>
               </View>
 
@@ -1018,19 +1075,33 @@ function LotsTabSection({
 }
 
 /** Tab 2: Lịch sử đặt chỗ */
-function ReservationsTabSection({ reservations, lots, onOpenDetail }) {
+function ReservationsTabSection({ reservations, lots, onOpenDetail, onHistory }) {
+  const historyLink = (
+    <Pressable onPress={onHistory} style={({ pressed }) => [styles.detailsCard, styles.txRow, pressed && styles.btnPressed]} accessibilityRole="button">
+      <Ionicons name="calendar-outline" size={18} color={colors.primary} />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.txTitle}>Lịch sử gửi xe & đặt chỗ</Text>
+        <Text style={styles.txSub}>Lọc theo ngày, xem phí, biên nhận từng lượt</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+    </Pressable>
+  );
   if (reservations.length === 0) {
     return (
-      <EmptyNotice
-        icon="ticket-outline"
-        title="Chưa có đặt chỗ"
-        subtitle="Khi bạn đặt chỗ trước, thông tin vé sẽ xuất hiện tại đây."
-      />
+      <View style={styles.sectionWrap}>
+        {historyLink}
+        <EmptyNotice
+          icon="ticket-outline"
+          title="Chưa có đặt chỗ"
+          subtitle="Khi bạn đặt chỗ trước, thông tin vé sẽ xuất hiện tại đây."
+        />
+      </View>
     );
   }
 
   return (
     <View style={styles.sectionWrap}>
+      {historyLink}
       <View style={styles.sectionHeading}>
         <Text style={styles.sectionTitle}>Lịch sử đặt chỗ</Text>
         <Text style={styles.sectionSubTitle}>{reservations.length} lượt ghi nhận</Text>
@@ -1127,7 +1198,14 @@ function VehiclesTabSection({ vehicles, onOpenAdd, onDelete }) {
 }
 
 /** Tab 4: Hồ sơ & Cài đặt (Hỗ trợ cập nhật hồ sơ) */
-function AccountTabSection({ user, onOpenEdit, onLogout, onTransactions }) {
+const ACCOUNT_LINKS = [
+  { screen: 'History', icon: 'calendar-outline', title: 'Lịch sử gửi xe & đặt chỗ', sub: 'Lọc theo ngày, chi tiết phí từng lượt' },
+  { screen: 'Favorites', icon: 'heart-outline', title: 'Bãi đỗ yêu thích', sub: 'Các bãi bạn đã lưu để đặt nhanh' },
+  { screen: 'Support', icon: 'help-buoy-outline', title: 'Hỗ trợ & báo cáo sự cố', sub: 'Hotline, câu hỏi thường gặp, gửi yêu cầu' },
+  { screen: 'NotificationSettings', icon: 'notifications-outline', title: 'Cài đặt thông báo', sub: 'Chọn loại thông báo muốn nhận' },
+];
+
+function AccountTabSection({ user, onOpenEdit, onLogout, onTransactions, onNavigate }) {
   return (
     <View style={styles.sectionWrap}>
       <View style={styles.profileBox}>
@@ -1174,6 +1252,20 @@ function AccountTabSection({ user, onOpenEdit, onLogout, onTransactions }) {
         </View>
         <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
       </Pressable>
+
+      <View style={styles.detailsCard}>
+        {ACCOUNT_LINKS.map((l, i) => (
+          <Pressable key={l.screen} onPress={() => onNavigate(l.screen)}
+            style={({ pressed }) => [styles.txRow, styles.menuRow, i > 0 && styles.menuBorder, pressed && styles.btnPressed]} accessibilityRole="button">
+            <Ionicons name={user?.role === 'admin' && l.screen === 'Support' ? 'shield-outline' : l.icon} size={18} color={colors.primary} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.txTitle}>{user?.role === 'admin' && l.screen === 'Support' ? 'Xử lý yêu cầu hỗ trợ & sự cố' : l.title}</Text>
+              <Text style={styles.txSub}>{l.sub}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+          </Pressable>
+        ))}
+      </View>
 
       <Pressable
         onPress={onLogout}
@@ -1284,6 +1376,8 @@ const styles = StyleSheet.create({
   dotGray: { backgroundColor: '#94A3B8' },
   statusPillText: { fontSize: 11, color: colors.textMuted, fontWeight: '600' },
   txRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  menuRow: { paddingVertical: 10 },
+  menuBorder: { borderTopWidth: 1, borderTopColor: '#F1F5F9' },
   txTitle: { fontSize: 14, fontWeight: '800', color: colors.text },
   txSub: { fontSize: 12, color: colors.textMuted, marginTop: 1 },
   bellBadge: {
@@ -1444,7 +1538,11 @@ const styles = StyleSheet.create({
 
   lotCardHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
   lotNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  lotNameText: { fontSize: 15, fontWeight: '700', color: colors.text },
+  lotNameText: { fontSize: 15, fontWeight: '700', color: colors.text, flexShrink: 1 },
+  lotRatingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5, alignSelf: 'flex-start' },
+  lotRatingText: { fontSize: 11.5, fontWeight: '700', color: colors.textMuted },
+  favBtn: { marginTop: 8, width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F1F5F9', alignSelf: 'flex-end' },
+  favBtnOn: { backgroundColor: '#FFF1F2' },
   iotBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.pill },
   iotOnline: { backgroundColor: '#ECFDF5' },
   iotOffline: { backgroundColor: '#F1F5F9' },

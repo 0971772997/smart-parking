@@ -4,13 +4,16 @@ const { HttpError } = require('./errors');
 const { createGatePass } = require('./gatePass');
 const { createLiveHub } = require('./live');
 const { createMomoGateway } = require('./paymentGateway');
+const { setPushHook } = require('./notifyHub');
 
 // Thao tac lam thay doi bai do / dat cho / phien gui xe -> bao app dang cho cap nhat (long-poll)
-const LIVE_PATHS = /^\/api\/(lots|reservations|gates|sessions|payments)\b/;
+const LIVE_PATHS = /^\/api\/(lots|reservations|gates|sessions|payments|support|favorites|reviews)\b/;
 
 function createApp({ db, auth, device, otpDevMode = true, social, gatePass = createGatePass('dev-qr-secret'),
   live = createLiveHub(), gateway = createMomoGateway(), publicUrl = 'http://localhost:3000', receiptSecret = 'dev-receipt-secret',
-  allowMockPayments = true }) {
+  allowMockPayments = true, push = null }) {
+  // Thong bao moi -> day toi dien thoai (push = createPushService; bo trong khi khong can, vd mot so test)
+  setPushHook(push ? (row) => push.sendNotification(row) : null);
   const app = express();
   app.disable('x-powered-by');
   app.use(cors());
@@ -27,12 +30,16 @@ function createApp({ db, auth, device, otpDevMode = true, social, gatePass = cre
 
   app.use('/api/auth', require('./routes/auth')({ db, auth, otpDevMode, social }));
   app.use('/api/vehicles', require('./routes/vehicles')({ db, auth }));
+  app.use('/api', require('./routes/feedback')({ db, auth })); // /favorites, /lots/:id/reviews (truoc router /lots)
   app.use('/api/lots', require('./routes/lots')({ db, auth, device }));
   app.use('/api/reservations', require('./routes/reservations')({ db, auth, device, gatePass }));
   app.use('/api/gates', require('./routes/gates')({ db, auth, device, gatePass }));
   app.use('/api/schedules', require('./routes/schedules')({ db, auth }));
   app.use('/api', require('./routes/live')({ db, live }));
   app.use('/api', require('./routes/sessions')({ db, auth }));
+  app.use('/api', require('./routes/history')({ db, auth }));
+  app.use('/api', require('./routes/support')({ db, auth }));
+  app.use('/api', require('./routes/push')({ db, auth, push }));
   app.use('/api', require('./routes/payments')({
     db, auth, gateway, publicUrl, receiptSecret, allowMock: allowMockPayments, live,
   }));

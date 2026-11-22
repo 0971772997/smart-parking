@@ -8,6 +8,7 @@
 //   active   --(het gio giu cho ma xe chua den)-->  expired  (= "khong den", tinh 1 lan vi pham)
 //   Qua cong bang ma QR (src/gatePass.js): entered_at / exited_at. Da qua cong vao thi khong bi tinh "khong den".
 const crypto = require('crypto');
+const { emitPush } = require('./notifyHub');
 
 const RULES = {
   maxActivePerUser: 1,                                         // moi tai khoan chi 1 dat cho dang hieu luc
@@ -48,13 +49,14 @@ const estimateFee = (pricePerHour, durationMinutes) =>
 // Thong bao "dat cho het han" cho cac dat cho vua chuyen 'expired' (moi dat cho bao 1 lan)
 async function notifyExpired(q, ids) {
   if (!ids.length) return;
-  await q.query(
+  const { rows } = await q.query(
     `INSERT INTO notifications (user_id, reservation_id, type, title, body, data, dedupe_key)
      SELECT r.user_id, r.id, 'reservation_expired', 'Đặt chỗ đã hết hạn',
             'Đã quá giờ giữ chỗ nhưng xe chưa đến nên ô #' || s.slot_number || ' được trả lại cho bãi. Lần này được tính là không đến.',
             jsonb_build_object('slotNumber', s.slot_number, 'code', r.code), 'r' || r.id || ':expired'
      FROM reservations r JOIN slots s ON s.id = r.slot_id WHERE r.id = ANY($1)
-     ON CONFLICT (dedupe_key) DO NOTHING`, [ids]);
+     ON CONFLICT (dedupe_key) DO NOTHING RETURNING *`, [ids]);
+  rows.forEach(emitPush);
 }
 
 async function expireStale(db) {

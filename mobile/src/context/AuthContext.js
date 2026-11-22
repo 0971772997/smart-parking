@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useMemo, useState } from 'react
 import { authApi } from '../api/auth';
 import { setAuthToken } from '../api/client';
 import { storage } from '../storage';
+import { unregisterPush } from '../notifications';
 
 const AuthContext = createContext(null);
 
@@ -34,6 +35,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    await unregisterPush(); // go token thong bao truoc khi xoa phien dang nhap
     await storage.clearToken();
     setAuthToken(null);
     setUser(null);

@@ -7,6 +7,7 @@ import { LiveProvider } from './src/context/LiveContext';
 import RootNavigator from './src/navigation/RootNavigator';
 import { navigationRef } from './src/navigation/ref';
 import NotificationToast from './src/components/NotificationToast';
+import PushBridge from './src/notifications/PushBridge';
 
 // Giu splash cua he dieu hanh cho toi khi SplashScreen (co animation) hien len
 NativeSplash.preventAutoHideAsync().catch(() => {});
@@ -20,6 +21,7 @@ export default function App() {
             <View style={{ flex: 1 }}>
               <RootNavigator />
               <NotificationToast />
+              <PushBridge />
             </View>
           </NavigationContainer>
         </LiveProvider>

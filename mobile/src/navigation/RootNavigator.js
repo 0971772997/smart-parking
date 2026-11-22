@@ -15,6 +15,14 @@ import NotificationsScreen from '../screens/notifications/NotificationsScreen';
 import PaymentScreen from '../screens/payment/PaymentScreen';
 import ReceiptScreen from '../screens/payment/ReceiptScreen';
 import TransactionsScreen from '../screens/payment/TransactionsScreen';
+import NotificationSettingsScreen from '../screens/notifications/NotificationSettingsScreen';
+import HistoryScreen from '../screens/history/HistoryScreen';
+import FavoritesScreen from '../screens/favorites/FavoritesScreen';
+import LotReviewsScreen from '../screens/reviews/LotReviewsScreen';
+import ReviewFormScreen from '../screens/reviews/ReviewFormScreen';
+import SupportScreen from '../screens/support/SupportScreen';
+import SupportTicketFormScreen from '../screens/support/SupportTicketFormScreen';
+import SupportTicketDetailScreen from '../screens/support/SupportTicketDetailScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -37,6 +45,14 @@ export default function RootNavigator() {
       <Stack.Screen name="Payment" component={PaymentScreen} options={{ title: 'Thanh toán' }} />
       <Stack.Screen name="Receipt" component={ReceiptScreen} options={{ title: 'Biên nhận' }} />
       <Stack.Screen name="Transactions" component={TransactionsScreen} options={{ title: 'Lịch sử giao dịch' }} />
+      <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} options={{ title: 'Cài đặt thông báo' }} />
+      <Stack.Screen name="History" component={HistoryScreen} options={{ title: 'Lịch sử gửi xe' }} />
+      <Stack.Screen name="Favorites" component={FavoritesScreen} options={{ title: 'Bãi đỗ yêu thích' }} />
+      <Stack.Screen name="LotReviews" component={LotReviewsScreen} options={{ title: 'Đánh giá bãi đỗ' }} />
+      <Stack.Screen name="ReviewForm" component={ReviewFormScreen} options={{ title: 'Viết đánh giá', animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="Support" component={SupportScreen} options={{ title: 'Hỗ trợ' }} />
+      <Stack.Screen name="SupportTicketForm" component={SupportTicketFormScreen} options={{ title: 'Gửi yêu cầu', animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="SupportTicket" component={SupportTicketDetailScreen} options={{ title: 'Yêu cầu hỗ trợ' }} />
     </Stack.Navigator>
   );
 }

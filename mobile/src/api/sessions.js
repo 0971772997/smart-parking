@@ -19,7 +19,15 @@ export const sessionsApi = {
 
 export const notificationsApi = {
   /** Thong bao cua toi (moi nhat truoc). after: chi lay thong bao co id > after */
-  list: ({ after = 0, limit = 30 } = {}, opts) => request(`/notifications?after=${after}&limit=${limit}`, opts),
+  list: ({ after = 0, limit = 30, unread = false } = {}, opts) =>
+    request(`/notifications?after=${after}&limit=${limit}${unread ? '&unread=1' : ''}`, opts),
+
+  /** Tuy chon nhan thong bao day theo nhom + thiet bi da dang ky */
+  prefs: (opts) => request('/notifications/prefs', opts),
+  setPrefs: (patch, opts) => request('/notifications/prefs', { method: 'PUT', body: patch, ...opts }),
+
+  /** May chu gui 1 thong bao day thu toi moi thiet bi cua toi */
+  testPush: (opts) => request('/push/test', { method: 'POST', ...opts }),
 
   /** Danh dau da doc: ids = [..] hoac all = true */
   read: ({ ids, all } = {}, opts) => request('/notifications/read', { method: 'POST', body: all ? { all: true } : { ids }, ...opts }),

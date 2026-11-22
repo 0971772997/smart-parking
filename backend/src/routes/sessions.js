@@ -4,7 +4,7 @@
 //   GET   /sessions/:id             chi tiet phien + dong thoi gian (tu thong bao cua phien)
 //   POST  /sessions/:id/extend      gia han thoi gian gui du kien { minutes }
 //   PATCH /sessions/:id             cap nhat phien { vehicleId }
-//   GET   /notifications            thong bao cua toi ?after=<id>&limit=
+//   GET   /notifications            thong bao cua toi ?after=<id>&limit=&unread=1
 //   POST  /notifications/read       danh dau da doc { ids: [..] } | { all: true }
 const express = require('express');
 const { wrap, badRequest, notFound, conflict } = require('../errors');
@@ -91,8 +91,10 @@ module.exports = function sessionRoutes({ db, auth }) {
     const after = v.int(req.query, 'after', { min: 0, def: 0 });
     const limit = v.int(req.query, 'limit', { min: 1, max: 100, def: 30 });
     await refreshAlerts(db, req.user.id);
+    const unreadOnly = req.query.unread === '1' || req.query.unread === 'true';
     const { rows } = await db.query(
-      `SELECT * FROM notifications WHERE user_id = $1 AND id > $2 ORDER BY id DESC LIMIT $3`, [req.user.id, after, limit]);
+      `SELECT * FROM notifications WHERE user_id = $1 AND id > $2 AND ($4::boolean IS FALSE OR read_at IS NULL)
+       ORDER BY id DESC LIMIT $3`, [req.user.id, after, limit, unreadOnly]);
     res.json({ items: rows.map(notification), unread: await unreadCount(req.user.id) });
   }));
 

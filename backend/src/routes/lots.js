@@ -4,6 +4,7 @@ const { wrap, badRequest, notFound, conflict, HttpError } = require('../errors')
 const v = require('../validate');
 const map = require('../mappers');
 const { RULES, RESERVATION_SELECT, newCode, estimateFee, expireStale, suspension, zoneSql } = require('../booking');
+const { notify, hhmm } = require('../sessions');
 
 // Tom tat theo khu vuc: [{ zone, total, free, occupied, reserved }]
 function zonesOf(slots) {
@@ -37,15 +38,18 @@ module.exports = function lotRoutes({ db, auth, device }) {
   r.get('/', wrap(async (_req, res) => {
     await expireStale(db);
     const { rows } = await db.query(`
-      SELECT l.*, COUNT(s.id) FILTER (WHERE s.state = 'free') AS free_slots
+      SELECT l.*, COUNT(s.id) FILTER (WHERE s.state = 'free') AS free_slots, rv.rating_avg, rv.rating_count
       FROM parking_lots l LEFT JOIN slots s ON s.lot_id = l.id
-      GROUP BY l.id ORDER BY l.name`);
+      LEFT JOIN LATERAL (SELECT AVG(rating) AS rating_avg, COUNT(*) AS rating_count FROM lot_reviews WHERE lot_id = l.id) rv ON true
+      GROUP BY l.id, rv.rating_avg, rv.rating_count ORDER BY l.name`);
     res.json(rows.map(map.lot));
   }));
 
   r.get('/:lotId', wrap(async (req, res) => {
     await expireStale(db);
     const lot = await getLot(req.params.lotId);
+    Object.assign(lot, await db.one(
+      'SELECT AVG(rating) AS rating_avg, COUNT(*) AS rating_count FROM lot_reviews WHERE lot_id = $1', [lot.id]));
     const { rows } = await db.query('SELECT * FROM slots WHERE lot_id = $1 ORDER BY slot_number', [lot.id]);
     const slots = rows.map(map.slot);
     res.json({
@@ -138,7 +142,13 @@ module.exports = function lotRoutes({ db, auth, device }) {
         [resv.id, err]);
     }
     const out = map.reservation(await db.one(`${RESERVATION_SELECT} WHERE r.id = $1`, [row.id]));
-    if (row.status === 'active') return res.status(201).json(out);
+    if (row.status === 'active') {
+      await notify(db, { userId: req.user.id, reservationId: row.id, type: 'reservation_confirmed', key: `r${row.id}:confirmed`,
+        title: 'Đặt chỗ thành công',
+        body: `Mã ${row.code} • ${lot.name}, khu ${slot.zone || '-'}, ô #${slot.slot_number}. Giữ chỗ đến ${hhmm(row.expires_at)} – quét mã QR tại cổng vào.`,
+        data: { code: row.code, slotNumber: slot.slot_number, expiresAt: row.expires_at } });
+      return res.status(201).json(out);
+    }
     if (!ack) throw Object.assign(new HttpError(504, 'device_timeout', 'Thiet bi khong phan hoi'), { details: out });
     throw Object.assign(conflict(row.error, 'Thiet bi tu choi dat cho'), { details: out });
   }));

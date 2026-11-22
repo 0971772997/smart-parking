@@ -11,6 +11,9 @@ export const PHASE = {
 
 // Bieu tuong + mau cho tung loai thong bao
 export const NOTE_TYPE = {
+  reservation_confirmed: { icon: 'ticket', color: colors.primary },
+  reservation_expiring: { icon: 'hourglass', color: '#D97706' },
+  test: { icon: 'notifications', color: colors.primary },
   session_started: { icon: 'enter', color: '#2563EB' },
   parked: { icon: 'car-sport', color: colors.success },
   wrong_slot: { icon: 'swap-horizontal', color: '#D97706' },
@@ -25,6 +28,10 @@ export const NOTE_TYPE = {
   payment_failed: { icon: 'close-circle', color: colors.danger },
   exited: { icon: 'flag', color: '#64748B' },
   reservation_expired: { icon: 'time', color: colors.danger },
+  support_new: { icon: 'help-buoy', color: colors.danger },
+  support_reply: { icon: 'chatbubbles', color: colors.primary },
+  support_status: { icon: 'checkmark-done-circle', color: colors.success },
+  review_reply: { icon: 'star', color: '#F59E0B' },
 };
 
 export const FLAG_LABEL = {

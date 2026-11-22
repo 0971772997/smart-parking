@@ -24,7 +24,8 @@ export function LiveProvider({ children }) {
   const [toast, setToast] = useState(null);
   const lastNoteId = useRef(null);
   const noteUser = useRef(null);
-  const noteBusy = useRef(false); // tranh 2 lan hoi chong nhau (lan dau mo app) -> toast lai thong bao cu // doi tai khoan -> ghi nhan lai moc thong bao
+  const noteBusy = useRef(false);
+  const pushedIds = useRef(new Set()); // thong bao he thong da hien (push) -> khong hien toast trung // tranh 2 lan hoi chong nhau (lan dau mo app) -> toast lai thong bao cu // doi tai khoan -> ghi nhan lai moc thong bao
   const activeRef = useRef(AppState.currentState !== 'background');
 
   // App xuong nen -> tam dung long-poll (tiet kiem pin / du lieu); quay lai -> hoi ngay
@@ -75,7 +76,9 @@ export function LiveProvider({ children }) {
       if (r.items.length) {
         const newest = r.items[0];
         const fresh = Date.now() - new Date(newest.createdAt).getTime() < 2 * 60 * 1000;
-        if (lastNoteId.current !== null && !newest.read && fresh) setToast({ ...newest, shownAt: Date.now() });
+        if (lastNoteId.current !== null && !newest.read && fresh && !pushedIds.current.has(newest.id)) {
+          setToast({ ...newest, shownAt: Date.now() });
+        }
         lastNoteId.current = Math.max(lastNoteId.current ?? 0, newest.id);
       } else if (lastNoteId.current === null) {
         lastNoteId.current = 0;
@@ -108,10 +111,12 @@ export function LiveProvider({ children }) {
     }
   }, []);
 
+  const markPushed = useCallback((id) => { pushedIds.current.add(Number(id)); }, []);
+
   const value = useMemo(() => ({
     version, lots, online, lastSyncAt, unread: user ? unread : 0, toast: user ? toast : null,
-    dismissToast: () => setToast(null), refreshNotifications, markAllRead,
-  }), [version, lots, online, lastSyncAt, unread, toast, user, refreshNotifications, markAllRead]);
+    dismissToast: () => setToast(null), refreshNotifications, markAllRead, markPushed, setUnread,
+  }), [version, lots, online, lastSyncAt, unread, toast, user, refreshNotifications, markAllRead, markPushed]);
 
   return <LiveContext.Provider value={value}>{children}</LiveContext.Provider>;
 }

@@ -12,6 +12,7 @@
 // Thong bao theo thoi gian (sap het gio / qua gio / phi tang) duoc tao "luoi" khi tai xe mo app
 // (refreshAlerts) -> khong can tien trinh chay nen danh thuc DB.
 const { RULES } = require('./booking');
+const { emitPush } = require('./notifyHub');
 
 const HOUR = 3600 * 1000;
 const MIN = 60 * 1000;
@@ -90,8 +91,9 @@ async function notify(q, { userId, sessionId = null, reservationId = null, type,
   if (!userId) return null;
   const { rows } = await q.query(
     `INSERT INTO notifications (user_id, session_id, reservation_id, type, title, body, data, dedupe_key)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (dedupe_key) DO NOTHING RETURNING id`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (dedupe_key) DO NOTHING RETURNING *`,
     [userId, sessionId, reservationId, type, title, body, data, key]);
+  if (rows[0]) emitPush(rows[0]); // thong bao moi (khong trung) -> gui day toi dien thoai
   return rows[0] || null;
 }
 

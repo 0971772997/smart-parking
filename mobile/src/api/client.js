@@ -72,6 +72,17 @@ const MESSAGES = {
   payment_not_found: 'Không tìm thấy giao dịch.',
   receipt_not_found: 'Không tìm thấy biên nhận.',
   invalid_gate: 'Cổng không hợp lệ.',
+  // Lich su, yeu thich, danh gia, ho tro
+  invalid_date: 'Ngày không hợp lệ.',
+  invalid_range: 'Ngày bắt đầu phải trước hoặc bằng ngày kết thúc.',
+  range_too_long: 'Chỉ xem được tối đa 1 năm mỗi lần.',
+  favorite_limit: 'Bạn đã lưu tối đa 50 bãi yêu thích.',
+  review_not_eligible: 'Bạn cần gửi xe tại bãi này ít nhất 1 lần để đánh giá.',
+  review_not_found: 'Không tìm thấy đánh giá.',
+  ticket_not_found: 'Không tìm thấy yêu cầu hỗ trợ.',
+  ticket_closed: 'Yêu cầu đã đóng. Hãy gửi yêu cầu mới nếu cần hỗ trợ thêm.',
+  lot_required: 'Vui lòng chọn bãi đỗ xảy ra sự cố.',
+  too_many_tickets: 'Bạn đã gửi nhiều yêu cầu trong 1 giờ qua. Vui lòng gọi hotline nếu khẩn cấp.',
   forbidden: 'Chỉ nhân viên / quản trị viên được dùng chức năng này.',
   internal_error: 'Máy chủ gặp sự cố. Vui lòng thử lại sau.',
 };

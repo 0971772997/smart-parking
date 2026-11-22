@@ -16,6 +16,9 @@ const lot = (l) => l && ({
   online: l.online, gates: { entry: l.entry_gate, exit: l.exit_gate }, fwVersion: l.fw_version,
   lastSeenAt: l.last_seen_at,
   ...(l.free_slots !== undefined && { freeSlots: Number(l.free_slots) }),
+  ...(l.rating_count !== undefined && {
+    rating: { average: l.rating_avg == null ? null : Math.round(Number(l.rating_avg) * 10) / 10, count: Number(l.rating_count) },
+  }),
 });
 
 const slot = (s) => s && ({

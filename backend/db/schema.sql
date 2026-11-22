@@ -263,3 +263,79 @@ CREATE TABLE IF NOT EXISTS payment_orders (
   expires_at   TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_payment_orders_session ON payment_orders (session_id, created_at DESC);
+
+-- v11: Thong bao day (Expo Push -> FCM / APNs)
+-- Moi thiet bi dang nhap dang ky 1 token; token het hieu luc (go app) -> Expo bao DeviceNotRegistered -> xoa
+CREATE TABLE IF NOT EXISTS push_tokens (
+  id           SERIAL PRIMARY KEY,
+  user_id      INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token        VARCHAR(200) NOT NULL UNIQUE,
+  platform     VARCHAR(10),                 -- android | ios
+  device_name  VARCHAR(100),
+  last_error   VARCHAR(60),
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_push_tokens_user ON push_tokens (user_id);
+-- Tuy chon nhan thong bao day theo nhom: { reservation, arrival, reminder, payment } (mac dinh bat het)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_prefs JSONB NOT NULL DEFAULT '{}';
+-- Ghi nhan da gui day cho thong bao nao (tranh gui lai)
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS pushed_at TIMESTAMPTZ;
+
+-- v12: Bai do yeu thich, danh gia / phan hoi co so bai do, ho tro & bao cao su co
+CREATE TABLE IF NOT EXISTS favorite_lots (
+  user_id    INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  lot_id     VARCHAR(50) NOT NULL REFERENCES parking_lots(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, lot_id)
+);
+
+-- Moi tai xe 1 danh gia / bai (sua lai duoc). Chi tai xe DA GUI XE o bai moi danh gia duoc (session_id = luot gan nhat)
+CREATE TABLE IF NOT EXISTS lot_reviews (
+  id          SERIAL PRIMARY KEY,
+  user_id     INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  lot_id      VARCHAR(50) NOT NULL REFERENCES parking_lots(id) ON DELETE CASCADE,
+  session_id  INT REFERENCES parking_sessions(id) ON DELETE SET NULL,
+  rating      SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  tags        TEXT[] NOT NULL DEFAULT '{}',          -- clean, safe, easy_find, staff, price, ... (xem src/feedback.js)
+  comment     VARCHAR(1000),
+  reply       VARCHAR(1000),                          -- phan hoi cua quan ly bai
+  replied_by  INT REFERENCES users(id) ON DELETE SET NULL,
+  replied_at  TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, lot_id)
+);
+CREATE INDEX IF NOT EXISTS idx_lot_reviews_lot ON lot_reviews (lot_id, updated_at DESC);
+
+-- Yeu cau ho tro (kind = support) / bao cao su co (kind = incident) + trao doi voi nhan vien
+CREATE TABLE IF NOT EXISTS support_tickets (
+  id             SERIAL PRIMARY KEY,
+  code           VARCHAR(16) NOT NULL UNIQUE,                     -- vd HT-7KQ2XA / SC-7KQ2XA
+  user_id        INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind           VARCHAR(10) NOT NULL CHECK (kind IN ('support', 'incident')),
+  category       VARCHAR(20) NOT NULL,
+  subject        VARCHAR(120) NOT NULL,
+  description    VARCHAR(2000) NOT NULL,
+  lot_id         VARCHAR(50) REFERENCES parking_lots(id) ON DELETE SET NULL,
+  slot_number    INT,
+  session_id     INT REFERENCES parking_sessions(id) ON DELETE SET NULL,
+  reservation_id INT REFERENCES reservations(id) ON DELETE SET NULL,
+  priority       VARCHAR(6) NOT NULL DEFAULT 'normal' CHECK (priority IN ('low', 'normal', 'high')),
+  status         VARCHAR(12) NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'in_progress', 'resolved', 'closed')),
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_at    TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_support_tickets_user ON support_tickets (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_support_tickets_status ON support_tickets (status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS support_messages (
+  id         SERIAL PRIMARY KEY,
+  ticket_id  INT NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
+  user_id    INT REFERENCES users(id) ON DELETE SET NULL,
+  staff      BOOLEAN NOT NULL DEFAULT false,
+  body       VARCHAR(2000) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_support_messages_ticket ON support_messages (ticket_id, id);

@@ -17,7 +17,12 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      },
+      "permissions": [
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.CAMERA"
+      ],
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -41,7 +46,21 @@
           "recordAudioAndroid": false
         }
       ],
-      "expo-web-browser"
-    ]
+      "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/android-icon-monochrome.png",
+          "color": "#1D4ED8",
+          "defaultChannel": "parking"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "32b959b3-9779-425f-8810-c15390fa2201"
+      }
+    },
+    "owner": "minhhtk2005"
   }
 }

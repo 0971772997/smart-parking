@@ -124,6 +124,12 @@ Có thể thử API bằng tay qua file `api.http` (extension **REST Client** tr
 - Biên nhận in được / chia sẻ: `GET /api/receipts/:receiptNo?t=<chữ ký>`. Lịch sử: `GET /api/payments`.
 - Biến môi trường (tuỳ chọn): `MOMO_ENDPOINT`, `MOMO_PARTNER_CODE`, `MOMO_ACCESS_KEY`, `MOMO_SECRET_KEY` (khoá thật), `PUBLIC_URL` (mặc định `RENDER_EXTERNAL_URL` do Render cấp), `ALLOW_MOCK_PAYMENTS` (thanh toán giả lập tức thì – mặc định tắt trên production).
 
+### Lịch sử, yêu thích, đánh giá, hỗ trợ (`routes/history.js`, `routes/feedback.js`, `routes/support.js`)
+- **Lịch sử**: `GET /api/history?from=YYYY-MM-DD&to=YYYY-MM-DD&kind=all|sessions|reservations&lotId=` (giờ Việt Nam, mặc định 30 ngày, tối đa 366 ngày) → phiên gửi xe + đặt chỗ không thành phiên (không trùng) + tổng hợp phí / thời gian / huỷ / không đến.
+- **Yêu thích**: `GET /api/favorites`, `PUT|DELETE /api/favorites/:lotId` (tối đa 50).
+- **Đánh giá**: `GET /api/lots/:lotId/reviews` (công khai, tổng hợp sao + thẻ), `GET|PUT|DELETE /api/lots/:lotId/reviews/mine` (mỗi tài xế 1 đánh giá/bãi, **chỉ khi đã gửi xe ở bãi**), admin `POST /api/reviews/:id/reply`. `GET /api/lots` kèm `rating { average, count }`.
+- **Hỗ trợ / sự cố**: `GET /api/support/info` (hotline, FAQ, danh mục), `POST /api/support/tickets` (`kind: support|incident`; sự cố cần bãi đỗ; barie/va quẹt/an ninh → ưu tiên cao; tối đa 5 yêu cầu/giờ), `GET /api/support/tickets[?scope=all]`, `GET /api/support/tickets/:id`, `POST .../messages`, `PATCH .../:id {status}`. Nhân viên trả lời / đổi trạng thái → thông báo (+ đẩy, nhóm `support`).
+
 ## 3. Chạy và test trên máy
 
 ```bash
