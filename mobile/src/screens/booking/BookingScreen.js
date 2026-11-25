@@ -14,6 +14,7 @@ import Notice from '../../components/Notice';
 import { lotsApi } from '../../api/lots';
 import { reservationsApi } from '../../api/reservations';
 import { vehiclesApi } from '../../api/vehicles';
+import { vehicleType } from '../../utils/vehicles';
 import { colors, radius } from '../../theme';
 import { formatDuration, formatVND } from '../../utils/schedules';
 import { DEFAULT_RULES, estimateFee, formatClock, formatDateTime, isOpen } from '../../utils/booking';
@@ -297,7 +298,7 @@ export default function BookingScreen({ navigation, route }) {
           <View style={styles.chipWrap}>
             <Chip label="Không chọn" on={vehicleId == null} onPress={() => setVehicleId(null)} />
             {vehicles.map((v) => (
-              <Chip key={v.id} icon="car-sport-outline" label={v.plateNumber} on={vehicleId === v.id} onPress={() => setVehicleId(v.id)} />
+              <Chip key={v.id} icon={vehicleType(v.vehicleType).icon} label={v.plateNumber} on={vehicleId === v.id} onPress={() => setVehicleId(v.id)} />
             ))}
           </View>
         </Section>
@@ -432,7 +433,7 @@ export function RulesBox({ rules }) {
     `Gia hạn tối đa ${rules.extend.maxTimes} lần, mỗi lần ≤ ${rules.extend.max} phút, khi chỗ còn đang giữ.`,
     'Huỷ miễn phí bất cứ lúc nào trước khi xe vào ô.',
     `Quá giờ giữ chỗ mà xe chưa vào ô → hết hạn, tính 1 lần không đến. ${rules.noShow.limit} lần trong ${rules.noShow.windowDays} ngày → tạm khoá đặt chỗ ${rules.noShow.suspendHours} giờ.`,
-    'Quét mã QR qua cổng vào → bắt đầu phiên gửi xe, phí tính từ lúc vào bãi (làm tròn lên theo giờ, tối thiểu 1 giờ).',
+    'Đến cổng vào, dùng app quét mã QR tại cổng → barie mở, bắt đầu phiên gửi xe, phí tính từ lúc vào bãi (làm tròn lên theo giờ, tối thiểu 1 giờ).',
     'Gửi quá giờ dự kiến hơn 5 phút → phụ phí 50% giá/giờ cho mỗi giờ quá hạn. Có thể gia hạn miễn phí trong phiên gửi xe.',
   ];
   return (

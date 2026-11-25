@@ -390,3 +390,13 @@ CREATE TABLE IF NOT EXISTS price_changes (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_price_changes_lot ON price_changes (lot_id, id DESC);
+
+-- v15: Tai xe tu quet ma QR cua cong (admin hien ma tren man hinh dat tai cong) + loai xe
+--   Nhat ky quet: scanned_by = nguoi quet (tai xe tu quet / nhan vien), mode = 'driver' | 'staff'
+ALTER TABLE gate_scans ADD COLUMN IF NOT EXISTS mode VARCHAR(10) NOT NULL DEFAULT 'staff';
+-- Loai xe: car (o to) | motorbike (xe may) | electric (xe dien) | bicycle (xe dap) | other
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS vehicle_type VARCHAR(20) NOT NULL DEFAULT 'car';
+DO $$ BEGIN
+  ALTER TABLE vehicles ADD CONSTRAINT chk_vehicle_type
+    CHECK (vehicle_type IN ('car', 'motorbike', 'electric', 'bicycle', 'other'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;

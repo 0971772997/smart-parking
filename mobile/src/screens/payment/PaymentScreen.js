@@ -281,7 +281,7 @@ function Result({ ok, title, amount, order, onReceipt, onBack, onRetry }) {
       ) : null}
       {ok ? (
         <>
-          <Text style={styles.muted}>Quét mã QR cổng ra trong phiên gửi xe, barie sẽ tự mở.</Text>
+          <Text style={styles.muted}>Đến cổng ra, dùng app quét mã QR tại cổng, barie sẽ tự mở.</Text>
           {onReceipt ? <Button title="Xem biên nhận điện tử" onPress={onReceipt} style={styles.fullBtn} /> : null}
           <Button title="Về phiên gửi xe" variant="outline" onPress={onBack} style={styles.fullBtn} />
         </>

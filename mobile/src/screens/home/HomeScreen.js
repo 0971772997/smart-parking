@@ -25,6 +25,7 @@ import { useAuth } from '../../context/AuthContext';
 import { lotsApi } from '../../api/lots';
 import { reservationsApi } from '../../api/reservations';
 import { vehiclesApi } from '../../api/vehicles';
+import { VEHICLE_TYPES, normalizePlate, plateError, vehicleType } from '../../utils/vehicles';
 import { authApi } from '../../api/auth';
 import { sessionsApi } from '../../api/sessions';
 import { favoritesApi } from '../../api/feedback';
@@ -105,6 +106,8 @@ const RESV_CONFIG = {
 // =====================================================================
 //  MAIN COMPONENT
 // =====================================================================
+const EMPTY_VEHICLE = { id: null, plateNumber: '', vehicleType: 'car', brand: '', color: '' };
+
 export default function HomeScreen({ navigation }) {
   const { user, signOut, updateUser } = useAuth();
   const { unread, lots: liveLots } = useLive();
@@ -129,7 +132,8 @@ export default function HomeScreen({ navigation }) {
 
   // Modal: Thêm xe mới
   const [showAddVehicleModal, setShowAddVehicleModal] = useState(false);
-  const [vehicleForm, setVehicleForm] = useState({ plateNumber: '', brand: '', color: '' });
+  const [vehicleForm, setVehicleForm] = useState(EMPTY_VEHICLE);
+  const [vehicleError, setVehicleError] = useState('');
   const [savingVehicle, setSavingVehicle] = useState(false);
 
   // Modal: Cập nhật hồ sơ
@@ -243,25 +247,42 @@ export default function HomeScreen({ navigation }) {
     }
   };
 
-  // Thêm xe mới
+  // Mở form thêm xe mới / sửa xe
+  const openVehicleForm = (v) => {
+    setVehicleForm(v ? {
+      id: v.id, plateNumber: v.plateNumber, vehicleType: v.vehicleType || 'car', brand: v.brand || '', color: v.color || '',
+    } : EMPTY_VEHICLE);
+    setVehicleError('');
+    setShowAddVehicleModal(true);
+  };
+
+  // Lưu xe (thêm mới hoặc cập nhật): biển số, tên / dòng xe, loại xe, màu
   const handleAddVehicle = async () => {
-    if (!vehicleForm.plateNumber.trim()) {
-      appAlert('Lỗi', 'Vui lòng nhập biển số xe.');
+    const err = plateError(vehicleForm.plateNumber);
+    if (err) {
+      setVehicleError(err);
       return;
     }
     setSavingVehicle(true);
+    setVehicleError('');
+    const body = {
+      plateNumber: normalizePlate(vehicleForm.plateNumber),
+      vehicleType: vehicleForm.vehicleType,
+      brand: vehicleForm.brand.trim(),
+      color: vehicleForm.color.trim(),
+    };
     try {
-      await vehiclesApi.create({
-        plateNumber: vehicleForm.plateNumber.trim().toUpperCase(),
-        brand: vehicleForm.brand.trim() || undefined,
-        color: vehicleForm.color.trim() || undefined,
-      });
-      appAlert('Thành công', 'Đã thêm phương tiện mới.');
+      if (vehicleForm.id) {
+        await vehiclesApi.update(vehicleForm.id, body);
+      } else {
+        await vehiclesApi.create({ ...body, brand: body.brand || undefined, color: body.color || undefined });
+      }
+      appAlert('Thành công', vehicleForm.id ? 'Đã cập nhật thông tin xe.' : 'Đã thêm phương tiện mới.');
       setShowAddVehicleModal(false);
-      setVehicleForm({ plateNumber: '', brand: '', color: '' });
+      setVehicleForm(EMPTY_VEHICLE);
       loadData(true);
     } catch (e) {
-      appAlert('Lỗi', e.message || 'Không thể thêm xe.');
+      setVehicleError(e.code === 'plate_taken' ? 'Biển số này đã được đăng ký.' : e.message || 'Không thể lưu xe.');
     } finally {
       setSavingVehicle(false);
     }
@@ -418,16 +439,15 @@ export default function HomeScreen({ navigation }) {
               </Pressable>
             )}
 
-            {user?.role === 'admin' && (
-              <Pressable
-                onPress={() => navigation.navigate('GateScanner')}
-                style={({ pressed }) => [styles.iconBtn, pressed && styles.btnPressed]}
-                accessibilityLabel="Quét mã QR tại cổng"
-                hitSlop={8}
-              >
-                <Ionicons name="qr-code-outline" size={18} color={colors.primary} />
-              </Pressable>
-            )}
+            {/* Tai xe: quet ma QR o cong vao / ra. Admin: mo ma QR cua cong de hien tai cong */}
+            <Pressable
+              onPress={() => navigation.navigate(user?.role === 'admin' ? 'GateDisplay' : 'GateCheckin')}
+              style={({ pressed }) => [styles.iconBtn, pressed && styles.btnPressed]}
+              accessibilityLabel={user?.role === 'admin' ? 'Mã QR tại cổng' : 'Quét mã QR tại cổng'}
+              hitSlop={8}
+            >
+              <Ionicons name={user?.role === 'admin' ? 'qr-code-outline' : 'scan-outline'} size={18} color={colors.primary} />
+            </Pressable>
 
             <Pressable
               onPress={() => navigation.navigate('Notifications')}
@@ -561,7 +581,8 @@ export default function HomeScreen({ navigation }) {
                 {activeTab === 'vehicles' && (
                   <VehiclesTabSection
                     vehicles={vehicles}
-                    onOpenAdd={() => setShowAddVehicleModal(true)}
+                    onOpenAdd={() => openVehicleForm(null)}
+                    onEdit={openVehicleForm}
                     onDelete={handleDeleteVehicle}
                   />
                 )}
@@ -591,7 +612,7 @@ export default function HomeScreen({ navigation }) {
             <View style={styles.dialogHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Ionicons name="car-sport" size={20} color={colors.primary} />
-                <Text style={styles.dialogTitle}>Đăng ký Phương tiện Mới</Text>
+                <Text style={styles.dialogTitle}>{vehicleForm.id ? 'Sửa thông tin xe' : 'Đăng ký Phương tiện Mới'}</Text>
               </View>
               <Pressable onPress={() => setShowAddVehicleModal(false)} hitSlop={8}>
                 <Ionicons name="close" size={22} color={colors.textMuted} />
@@ -599,18 +620,37 @@ export default function HomeScreen({ navigation }) {
             </View>
 
             <View style={styles.formField}>
-              <Text style={styles.formLabel}>Biển số xe *</Text>
-              <TextInput
-                style={styles.formInput}
-                placeholder="Ví dụ: 43A-123.45"
-                value={vehicleForm.plateNumber}
-                onChangeText={(t) => setVehicleForm((f) => ({ ...f, plateNumber: t }))}
-                autoCapitalize="characters"
-              />
+              <Text style={styles.formLabel}>Loại xe *</Text>
+              <View style={styles.typeRow}>
+                {VEHICLE_TYPES.map((t) => {
+                  const on = vehicleForm.vehicleType === t.key;
+                  return (
+                    <Pressable key={t.key} onPress={() => setVehicleForm((f) => ({ ...f, vehicleType: t.key }))}
+                      style={[styles.typeChip, on && styles.typeChipOn]} accessibilityState={{ selected: on }}>
+                      <Ionicons name={t.icon} size={15} color={on ? colors.primary : colors.textMuted} />
+                      <Text style={[styles.typeChipText, on && styles.typeChipTextOn]}>{t.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
             </View>
 
             <View style={styles.formField}>
-              <Text style={styles.formLabel}>Hãng xe / Dòng xe</Text>
+              <Text style={styles.formLabel}>Biển số xe *</Text>
+              <TextInput
+                style={[styles.formInput, vehicleError ? styles.formInputError : null]}
+                placeholder={vehicleForm.vehicleType === 'motorbike' ? 'Ví dụ: 43-B1 123.45' : 'Ví dụ: 43A-123.45'}
+                value={vehicleForm.plateNumber}
+                onChangeText={(t) => { setVehicleForm((f) => ({ ...f, plateNumber: t })); setVehicleError(''); }}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                maxLength={20}
+              />
+              {vehicleError ? <Text style={styles.formError}>{vehicleError}</Text> : null}
+            </View>
+
+            <View style={styles.formField}>
+              <Text style={styles.formLabel}>Tên xe / Hãng – dòng xe</Text>
               <TextInput
                 style={styles.formInput}
                 placeholder="Ví dụ: VinFast VF8, Toyota Cross"
@@ -1154,7 +1194,7 @@ function ReservationsTabSection({ reservations, lots, onOpenDetail, onHistory })
 }
 
 /** Tab 3: Xe cá nhân (Hỗ trợ thêm xe & xóa xe) */
-function VehiclesTabSection({ vehicles, onOpenAdd, onDelete }) {
+function VehiclesTabSection({ vehicles, onOpenAdd, onEdit, onDelete }) {
   return (
     <View style={styles.sectionWrap}>
       <View style={styles.sectionHeading}>
@@ -1177,14 +1217,19 @@ function VehiclesTabSection({ vehicles, onOpenAdd, onDelete }) {
         />
       ) : (
         vehicles.map((v) => (
-          <View key={v.id} style={styles.vehicleCard}>
+          <Pressable key={v.id} style={styles.vehicleCard} onPress={() => onEdit(v)}
+            accessibilityLabel={`Sửa xe ${v.plateNumber}`}>
             <View style={styles.vehiclePlateBox}>
               <Text style={styles.vehiclePlatePrefix}>VN</Text>
               <Text style={styles.vehiclePlateNum}>{v.plateNumber}</Text>
             </View>
 
             <View style={styles.vehicleDetails}>
-              <Text style={styles.vehicleBrandText}>{v.brand || 'Xe ô tô'}</Text>
+              <View style={styles.vehicleColorRow}>
+                <Ionicons name={vehicleType(v.vehicleType).icon} size={14} color={colors.primary} />
+                <Text style={styles.vehicleBrandText}>{v.brand || vehicleType(v.vehicleType).label}</Text>
+              </View>
+              <Text style={styles.vehicleColorText}>{vehicleType(v.vehicleType).label} • Chạm để sửa</Text>
               <View style={styles.vehicleColorRow}>
                 <Ionicons name="color-palette-outline" size={13} color={colors.textMuted} />
                 <Text style={styles.vehicleColorText}>{v.color || 'Màu tiêu chuẩn'}</Text>
@@ -1201,7 +1246,7 @@ function VehiclesTabSection({ vehicles, onOpenAdd, onDelete }) {
                 <Text style={styles.deleteVehicleBtnText}>Xóa</Text>
               </Pressable>
             </View>
-          </View>
+          </Pressable>
         ))
       )}
     </View>
@@ -1787,6 +1832,13 @@ const styles = StyleSheet.create({
   dialogHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
   dialogTitle: { fontSize: 15, fontWeight: '800', color: colors.text },
   formField: { marginBottom: 12 },
+  formInputError: { borderColor: colors.danger },
+  formError: { fontSize: 12, color: colors.danger, marginTop: 4 },
+  typeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  typeChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 7, borderRadius: radius.pill, borderWidth: 1, borderColor: '#E2E8F0', backgroundColor: '#fff' },
+  typeChipOn: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  typeChipText: { fontSize: 12.5, fontWeight: '700', color: colors.textMuted },
+  typeChipTextOn: { color: colors.primary },
   formLabel: { fontSize: 12, fontWeight: '600', color: colors.textMuted, marginBottom: 5 },
   formInput: {
     borderWidth: 1,

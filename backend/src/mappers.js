@@ -8,7 +8,8 @@ const user = (u) => u && ({
 });
 
 const vehicle = (v) => v && ({
-  id: v.id, plateNumber: v.plate_number, brand: v.brand, color: v.color, createdAt: v.created_at,
+  id: v.id, plateNumber: v.plate_number, vehicleType: v.vehicle_type || 'car', brand: v.brand, color: v.color,
+  createdAt: v.created_at,
 });
 
 const lot = (l) => l && ({
@@ -33,6 +34,7 @@ const reservation = (r) => {
   return {
     id: r.id, code: r.code, lotId: r.lot_id, lotName: r.lot_name, lotAddress: r.lot_address,
     zone: r.zone, slotNumber: r.slot_number, vehicleId: r.vehicle_id, vehiclePlate: r.vehicle_plate ?? null,
+    vehicleType: r.vehicle_type ?? null, vehicleBrand: r.vehicle_brand ?? null,
     status: r.status, minutes: r.minutes, holdMinutes: r.minutes, durationMinutes: r.duration_minutes,
     estimatedFee: r.estimated_fee, hourlyRate: r.hourly_rate ?? null, extendCount: r.extend_count ?? 0, error: r.error,
     confirmedAt: r.confirmed_at, expiresAt: r.expires_at, createdAt: r.created_at, updatedAt: r.updated_at,
@@ -72,6 +74,7 @@ const payment = (p) => p && ({
 const gateScan = (g) => g && ({
   id: g.id, lotId: g.lot_id, gate: g.gate, reservationId: g.reservation_id, result: g.result, error: g.error,
   reservationCode: g.reservation_code ?? null, slotNumber: g.slot_number ?? null, vehiclePlate: g.vehicle_plate ?? null,
+  vehicleType: g.vehicle_type ?? null, mode: g.mode || 'staff', sessionId: g.session_id ?? null,
   scannedBy: g.scanned_by, createdAt: g.created_at, confirmedAt: g.confirmed_at,
 });
 

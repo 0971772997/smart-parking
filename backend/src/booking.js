@@ -19,7 +19,8 @@ const RULES = {
   pendingTimeoutSeconds: 60, // 'pending' qua 60s (server loi giua chung) -> failed
   noShow: { limit: 3, windowDays: 7, suspendHours: 24 },   // 3 lan khong den trong 7 ngay -> khoa dat cho 24 gio
   // Ma QR qua cong: song 120s (app tu lam moi), ma ra bai dung duoc trong 48 gio ke tu luc dat
-  gate: { qrTtlSeconds: 120, refreshBeforeSeconds: 20, exitWithinHours: 48 },
+  // gateQrTtlSeconds: ma QR hien o cong (tai xe tu quet) doi sau 60s
+  gate: { qrTtlSeconds: 120, refreshBeforeSeconds: 20, exitWithinHours: 48, gateQrTtlSeconds: 60 },
   // Phien gui xe (src/sessions.js): bat dau khi barie cong vao mo, phi tinh tu luc vao bai
   session: {
     extend: { options: [30, 60, 120], maxTimes: 5, maxTotalMinutes: 1440 }, // gia han thoi gian gui du kien
@@ -95,7 +96,7 @@ const zoneSql = (slotNumberExpr, totalExpr) =>
 // Dat cho kem bai, khu vuc, o, bien so (dung cho danh sach / chi tiet / ket qua dat)
 const RESERVATION_SELECT = `
   SELECT r.*, s.lot_id, s.slot_number, s.zone, l.online, l.name AS lot_name, l.address AS lot_address,
-         veh.plate_number AS vehicle_plate,
+         veh.plate_number AS vehicle_plate, veh.vehicle_type, veh.brand AS vehicle_brand,
          (SELECT ps.id FROM parking_sessions ps WHERE ps.reservation_id = r.id) AS session_id
   FROM reservations r
   JOIN slots s ON s.id = r.slot_id

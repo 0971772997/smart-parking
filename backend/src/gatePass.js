@@ -8,11 +8,18 @@
 //
 // Luong: tai xe mo app -> GET /api/reservations/:id/pass -> hien QR
 //        nhan vien quet -> POST /api/gates/scan -> kiem tra -> lenh open_gate toi ESP32 -> ack ok = xac nhan
+//
+// LUONG CHINH (tu v15): MA QR CUA CONG - admin hien ma tren man hinh dat tai cong, TAI XE quet bang app
+//   SPG1.<id bai base64url>.<E|X>.<het han epoch base36>.<nonce>.<chu ky>
+//   - Tu doi moi RULES.gate.gateQrTtlSeconds -> anh chup ma cu khong dung de "mo cong tu xa" duoc.
+//   - Tai xe quet -> POST /api/gates/checkin { token } -> may chu tim dat cho cua tai xe o bai do,
+//     kiem tra nhu khi nhan vien quet -> mo barie.
 const crypto = require('crypto');
 const { RULES } = require('./booking');
 const { sessionFee, startGateSession, closeSession, notify, vnd } = require('./sessions');
 
 const VERSION = 'SP1';
+const GATE_VERSION = 'SPG1'; // ma QR cua CONG (admin hien tai cong, tai xe quet) - xem issueGate
 const GATE_CODE = { entry: 'E', exit: 'X' };
 const CODE_GATE = { E: 'entry', X: 'exit' };
 
@@ -48,7 +55,35 @@ function createGatePass(secret) {
     return { ok: true, ...base };
   }
 
-  return { issue, verify };
+  // Ma QR hien tai cong (cho tai xe quet). Chu ky co tien to rieng -> khong doi lan voi ma dat cho.
+  const gsig = (body) => sig(`gate|${body}`);
+  function issueGate(lotId, gate, ttlSeconds = RULES.gate.gateQrTtlSeconds) {
+    const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
+    const nonce = crypto.randomBytes(6).toString('base64url');
+    const lot64 = Buffer.from(String(lotId)).toString('base64url');
+    const body = [GATE_VERSION, lot64, GATE_CODE[gate], exp.toString(36), nonce].join('.');
+    return { token: `${body}.${gsig(body)}`, lotId, gate, nonce, expiresAt: new Date(exp * 1000), ttlSeconds };
+  }
+
+  // -> { ok: true, lotId, gate, nonce, expiresAt } | { ok: false, error: 'qr_invalid' | 'qr_expired', ... }
+  function verifyGate(raw) {
+    const parts = String(raw || '').trim().split('.');
+    if (parts.length !== 6 || parts[0] !== GATE_VERSION) return { ok: false, error: 'qr_invalid' };
+    const [, lot64, g, expS, nonce, s] = parts;
+    const expected = Buffer.from(gsig(parts.slice(0, 5).join('.')));
+    const got = Buffer.from(s);
+    if (got.length !== expected.length || !crypto.timingSafeEqual(got, expected)) return { ok: false, error: 'qr_invalid' };
+    const lotId = Buffer.from(lot64, 'base64url').toString('utf8');
+    const exp = parseInt(expS, 36);
+    const gate = CODE_GATE[g];
+    if (!gate || !lotId || !Number.isSafeInteger(exp)) return { ok: false, error: 'qr_invalid' };
+    const base = { lotId, gate, nonce, expiresAt: new Date(exp * 1000) };
+    // Du phong 10s: man hinh cong vua doi ma dung luc tai xe dang quet
+    if (exp + 10 < Date.now() / 1000) return { ok: false, error: 'qr_expired', ...base };
+    return { ok: true, ...base };
+  }
+
+  return { issue, verify, issueGate, verifyGate };
 }
 
 // Luot do gan nhat cua dat cho (kem thanh toan) -> de kiem tra cong ra

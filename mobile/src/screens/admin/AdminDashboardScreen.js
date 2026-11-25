@@ -24,7 +24,7 @@ const SECTIONS = [
   { screen: 'AdminReviews', icon: 'star', label: 'Đánh giá', color: '#D97706' },
   { screen: 'Support', icon: 'help-buoy', label: 'Hỗ trợ & sự cố', color: '#DC2626' },
   { screen: 'AdminBroadcast', icon: 'megaphone', label: 'Thông báo chung', color: '#DB2777' },
-  { screen: 'GateScanner', icon: 'qr-code', label: 'Quét mã tại cổng', color: '#0F172A' },
+  { screen: 'GateDisplay', icon: 'qr-code', label: 'Mã QR tại cổng', color: '#0F172A' },
   { screen: 'AdminAudit', icon: 'document-text', label: 'Nhật ký quản trị', color: '#475569' },
 ];
 const RANGES = [{ key: 7, label: '7 ngày' }, { key: 30, label: '30 ngày' }];

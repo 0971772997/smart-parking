@@ -9,7 +9,8 @@ import ScheduleFormScreen from '../screens/schedules/ScheduleFormScreen';
 import SetupParkingLotScreen from '../screens/parking/SetupParkingLotScreen';
 import BookingScreen from '../screens/booking/BookingScreen';
 import ReservationDetailScreen from '../screens/booking/ReservationDetailScreen';
-import GateScannerScreen from '../screens/gate/GateScannerScreen';
+import GateCheckinScreen from '../screens/gate/GateCheckinScreen';
+import GateDisplayScreen from '../screens/gate/GateDisplayScreen';
 import SessionDetailScreen from '../screens/session/SessionDetailScreen';
 import NotificationsScreen from '../screens/notifications/NotificationsScreen';
 import PaymentScreen from '../screens/payment/PaymentScreen';
@@ -50,7 +51,8 @@ export default function RootNavigator() {
       <Stack.Screen name="SetupParkingLot" component={SetupParkingLotScreen} options={{ title: 'Sơ đồ Mặt bằng Bãi đỗ xe' }} />
       <Stack.Screen name="Booking" component={BookingScreen} options={{ title: 'Đặt chỗ' }} />
       <Stack.Screen name="ReservationDetail" component={ReservationDetailScreen} options={{ title: 'Chi tiết đặt chỗ' }} />
-      <Stack.Screen name="GateScanner" component={GateScannerScreen} options={{ title: 'Quét mã tại cổng' }} />
+      <Stack.Screen name="GateCheckin" component={GateCheckinScreen} options={{ title: 'Quét mã tại cổng' }} />
+      <Stack.Screen name="GateDisplay" component={GateDisplayScreen} options={{ title: 'Mã QR tại cổng' }} />
       <Stack.Screen name="SessionDetail" component={SessionDetailScreen} options={{ title: 'Phiên gửi xe' }} />
       <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Thông báo' }} />
       <Stack.Screen name="Payment" component={PaymentScreen} options={{ title: 'Thanh toán' }} />

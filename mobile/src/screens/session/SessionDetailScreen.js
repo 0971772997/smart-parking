@@ -11,7 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Notice from '../../components/Notice';
-import GatePassCard from '../../components/GatePassCard';
+import GateCheckinCard from '../../components/GateCheckinCard';
 import OfflineBanner from '../../components/OfflineBanner';
 import { sessionsApi } from '../../api/sessions';
 import { vehiclesApi } from '../../api/vehicles';
@@ -327,7 +327,7 @@ export default function SessionDetailScreen({ navigation, route }) {
           </View>
 
           {/* MA QR CONG RA + THANH TOAN */}
-          {showPass ? <GatePassCard key={`${s.id}-${s.phase}-${s.paid}`} resv={passResv} onChanged={load} /> : null}
+          {showPass ? <GateCheckinCard key={`${s.id}-${s.phase}-${s.paid}`} resv={passResv} onChanged={load} /> : null}
 
           {/* DONG THOI GIAN */}
           {s.timeline?.length ? (

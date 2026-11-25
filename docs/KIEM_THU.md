@@ -86,6 +86,15 @@ Các nhóm test chính: đăng ký/đăng nhập, phân quyền, đặt chỗ (t
 | `app.json` | Android (`vn.smartpark.app`, quyền Camera + thông báo), iOS hỗ trợ iPad, khoá dọc; `expo-doctor` 20/20 |
 | Hạn chế | **Chưa chạy trên điện thoại thật** trong đợt này (chỉ Chrome mô phỏng chiều rộng). Nên thử bằng bản dev build Android + Expo Go trên iPhone: quét QR bằng camera, thông báo đẩy khi tắt màn hình, cỡ chữ lớn của hệ điều hành. Ghi chú: một trình duyệt mở **6 tab app trở lên** cùng lúc sẽ đụng giới hạn 6 kết nối HTTP/1.1 / máy chủ của Chrome (mỗi tab giữ 1 long-poll); người dùng bình thường mở 1 app nên không gặp. |
 
+### 1.5 Tài xế tự quét mã QR tại cổng + khai báo loại xe (25/11/2026)
+
+| Kiểm tra | Kết quả |
+|---|---|
+| `backend/tests/checkin.test.js` (12 test): admin lấy mã cổng (tài xế 403); mã rác / mã đặt chỗ cũ / khoá khác / sửa id bãi / hết hạn / bãi đã xoá; chưa đặt chỗ → `no_reservation`; offline → 503; quét cổng RA khi chưa vào; gắn xe người khác; vào bãi (gắn xe, mở phiên), quét lại → `already_entered`; cổng ra `still_parked` → 402 → trả tiền → mở; bấm 2 lần cùng lúc chỉ mở 1 lần; nhật ký `mode=driver`; thêm / sửa xe, loại xe, biển số sai | **12/12 PASS** (+ `gate.test.js` cũ 9/9 vẫn PASS) |
+| Backend toàn bộ (`npm test`) | 298/302 – 4 lỗi ở `concurrency.test.js` khi chạy chung (độ trễ DB); chạy riêng `npm run test:load` **6/6 PASS** |
+| App `tests/gateVehicle.test.mjs` (nhận diện mã cổng, thông báo lỗi tài xế, loại xe, biển số) | `mobile/ npm test` **39/39 PASS** |
+| Chrome (API local + ESP32 giả lập): admin mở "Mã QR tại cổng" → tài xế nhập mã cổng VÀO → barie mở, khu B ô #3, xe 43A-123.45 gắn vào đặt chỗ; cổng RA chưa trả phí → màn cam "Chưa thanh toán 10.000đ"; admin bấm "Đã thu tiền mặt" → tài xế quét lại → màn cổng hiện "Hẹn gặp lại!"; thêm xe máy `43-b1 678.90` → lưu `43-B1 678.90` | Đạt. Chưa thử camera thật trên điện thoại |
+
 ## 2. Kiểm thử end-to-end với Wokwi (API thật + broker + ESP32 mô phỏng)
 
 ### 2.1 Bằng script `backend/scripts/e2e.js` (19/11/2026)

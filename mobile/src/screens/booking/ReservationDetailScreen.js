@@ -1,5 +1,5 @@
 // CHI TIET DAT CHO: ma xac nhan, dem nguoc giu cho, tien trinh (tao -> xac nhan -> qua cong -> xe vao / huy / het han -> ra bai)
-// Ma QR qua cong VAO / RA (GatePassCard) hien khi dat cho con dung duoc o cong (resv.nextGate).
+// The qua cong VAO / RA (GateCheckinCard: tai xe quet ma QR cua cong) hien khi dat cho con dung duoc o cong (resv.nextGate).
 // Gia han (toi da theo quy tac), huy (xac nhan truoc), chi duong.
 // params: { id, initial?, justCreated? }
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -11,7 +11,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import Button from '../../components/Button';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import Notice from '../../components/Notice';
-import GatePassCard from '../../components/GatePassCard';
+import GateCheckinCard from '../../components/GateCheckinCard';
 import { reservationsApi } from '../../api/reservations';
 import { useOnLiveChange } from '../../context/LiveContext';
 import OfflineBanner from '../../components/OfflineBanner';
@@ -182,7 +182,7 @@ export default function ReservationDetailScreen({ navigation, route }) {
           <Text style={styles.codeLabel}>MÃ ĐẶT CHỖ</Text>
           <Text style={styles.code} selectable>{resv.code || `#${resv.id}`}</Text>
           <Text style={styles.codeHint}>
-            {resv.nextGate ? 'Quét mã QR bên dưới tại cổng. Đọc mã này cho nhân viên nếu cần đối chiếu.' : 'Đọc mã này cho nhân viên nếu cần đối chiếu tại cổng.'}
+            {resv.nextGate ? 'Đến cổng, quét mã QR trên màn hình tại cổng bằng app. Đọc mã này cho nhân viên nếu cần đối chiếu.' : 'Đọc mã này cho nhân viên nếu cần đối chiếu tại cổng.'}
           </Text>
 
           {resv.status === 'active' && (
@@ -215,14 +215,14 @@ export default function ReservationDetailScreen({ navigation, route }) {
             <Ionicons name="car-sport" size={20} color={colors.success} />
             <View style={{ flex: 1 }}>
               <Text style={styles.sessionTitle}>{resv.exitedAt ? 'Xem lại phiên gửi xe' : 'Phiên gửi xe đang hoạt động'}</Text>
-              <Text style={styles.sessionSub}>Thời gian gửi, phí hiện tại, gia hạn, thanh toán & mã QR cổng ra</Text>
+              <Text style={styles.sessionSub}>Thời gian gửi, phí hiện tại, gia hạn, thanh toán & quét mã cổng ra</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.success} />
           </Pressable>
         ) : null}
 
         {/* MA QR QUA CONG (cong ra: hien trong man Phien gui xe neu da co phien) */}
-        {resv.nextGate && !(resv.sessionId && resv.nextGate === 'exit') ? <GatePassCard resv={resv} onChanged={load} /> : null}
+        {resv.nextGate && !(resv.sessionId && resv.nextGate === 'exit') ? <GateCheckinCard resv={resv} onChanged={load} /> : null}
 
         {/* THONG TIN */}
         <View style={styles.card}>
