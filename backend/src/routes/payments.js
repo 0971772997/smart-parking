@@ -9,7 +9,13 @@
 //   GET  /payments/:id                     chi tiet giao dich = bien nhan dien tu (JSON)
 //   GET  /receipts/:receiptNo?t=...        bien nhan dang trang in duoc (lien ket co chu ky, chia se duoc)
 //   POST /sessions/:id/pay                 thanh toan GIA LAP tuc thi (chi khi bat ALLOW_MOCK_PAYMENTS / ngoai production)
-//   POST /lots/:lotId/sessions/:id/pay     admin thu tien mat tai cong
+//   POST /lots/:lotId/sessions/:id/pay     admin thu tien mat tai cong { method, openGate? }
+// TRA TRUC TIEP (tien mat / chuyen khoan MB / vi MoMo vao tai khoan cua bai) - admin xac nhan da nhan tien:
+//   POST /sessions/:id/manual-pay          tai xe chon { method: cash | bank | momo } -> don cho xac nhan
+//                                          (+ thong tin chuyen khoan, ma VietQR, noi dung CK = ma don)
+//   GET  /payments/pending?lotId=          (admin) don dang cho xac nhan
+//   POST /payments/orders/:orderId/confirm (admin) da nhan tien { openGate } -> ghi giao dich + mo barie cong ra
+//   POST /payments/orders/:orderId/reject  (admin) chua nhan duoc tien { reason }
 const crypto = require('crypto');
 const express = require('express');
 const { wrap, badRequest, notFound, conflict, HttpError } = require('../errors');
@@ -19,8 +25,16 @@ const { SESSION_SELECT, closeSession } = require('../sessions');
 const {
   PAYMENT_SELECT, recordPayment, settleOrder, paymentView, orderView, receiptToken, receiptHtml,
 } = require('../payments');
+const { buildVietQR } = require('../vietqr');
+const { createGateOps } = require('../gateOps');
 
 const GATEWAY_METHODS = ['momo', 'atm', 'card'];
+const MANUAL_METHODS = ['cash', 'bank', 'momo'];
+const MANUAL_TTL_HOURS = 24;
+const MANUAL_LABEL = { cash: 'Tiền mặt', bank: 'Chuyển khoản ngân hàng', momo: 'Chuyển tiền ví MoMo' };
+const waitingMessage = (m) => (m === 'cash'
+  ? 'Đưa tiền mặt cho nhân viên tại cổng – nhân viên xác nhận xong barie sẽ mở'
+  : 'Đang chờ nhân viên xác nhận đã nhận tiền chuyển khoản');
 const MOCK_METHODS = ['card', 'momo', 'zalopay', 'bank', 'atm'];
 const ADMIN_METHODS = ['cash', ...MOCK_METHODS];
 const ORDER_TTL_MIN = 20;
@@ -39,7 +53,8 @@ function parseMethod(body, allowed) {
   return m;
 }
 
-module.exports = function paymentRoutes({ db, auth, gateway, publicUrl, receiptSecret, allowMock = false, live }) {
+module.exports = function paymentRoutes({ db, auth, device, gateway, publicUrl, receiptSecret, allowMock = false, live, payee }) {
+  const gateOps = device ? createGateOps({ db, device }) : null;
   const r = express.Router();
   const user = auth.requireAuth;
   const admin = [auth.requireAuth, auth.requireAdmin];
@@ -64,7 +79,7 @@ module.exports = function paymentRoutes({ db, auth, gateway, publicUrl, receiptS
 
   // Hoi cong ve don dang cho (du phong khi IPN khong toi) -> don moi nhat
   async function refreshOrder(o) {
-    if (o.status !== 'pending') return o;
+    if (o.status !== 'pending' || o.provider === 'manual') return o; // don tra truc tiep: cho admin xac nhan
     try {
       const q = await gateway.query({ orderId: o.order_id, requestId: o.request_id });
       return await settle(o, q);
@@ -79,8 +94,133 @@ module.exports = function paymentRoutes({ db, auth, gateway, publicUrl, receiptS
     res.json({
       provider: gateway.name, sandbox: gateway.sandbox, methods: GATEWAY_METHODS, minAmount: MIN_AMOUNT,
       orderTtlMinutes: ORDER_TTL_MIN, hints: gateway.sandbox ? SANDBOX_HINTS : {}, mockEnabled: allowMock,
+      manual: { methods: MANUAL_METHODS, payee: payeeView() },
     });
   });
+
+  // ---------- Tra truc tiep: tien mat / chuyen khoan / vi MoMo (admin xac nhan) ----------
+  function payeeView() {
+    return payee ? {
+      bankName: payee.bankName, bankBin: payee.bankBin, accountNo: payee.accountNo,
+      accountName: payee.accountName, momoPhone: payee.momoPhone,
+    } : null;
+  }
+
+  // Thong tin de tai xe chuyen tien: noi dung CK = ma don (admin doi chieu trong app ngan hang)
+  function payInfo(o) {
+    if (o.provider !== 'manual' || o.method === 'cash' || !payee) return null;
+    return {
+      ...payeeView(), amount: o.amount, content: o.order_id,
+      vietqr: buildVietQR({ bin: payee.bankBin, accountNo: payee.accountNo, amount: o.amount, content: o.order_id }),
+    };
+  }
+  const manualOut = async (o) => ({ ...(await orderOut(o)), payInfo: payInfo(o) });
+
+  r.post('/sessions/:id/manual-pay', user, wrap(async (req, res) => {
+    const id = v.int(req.params, 'id', { min: 1 });
+    const method = parseMethod(req.body, MANUAL_METHODS);
+    let s = await loadSession(id);
+    if (!s || s.owner_id !== req.user.id) throw notFound('session_not_found', 'Khong tim thay luot do');
+    if (s.payment_id) throw conflict('already_paid', 'Luot do nay da duoc thanh toan');
+    if (!s.ended_at) {
+      if (s.source !== 'gate' || s.parked_at) throw conflict('session_not_ended', 'Xe chua roi bai, chua thanh toan duoc');
+      await closeSession(db, s.id);
+      s = await loadSession(id);
+    }
+    const amount = s.fee || 0;
+    if (amount <= 0) throw conflict('no_payment_needed', 'Luot do nay mien phi');
+
+    // 1 phien chi giu 1 don tra truc tiep dang cho: doi phuong thuc -> cap nhat don cu (giu nguyen ma / noi dung CK)
+    const cur = await db.one(
+      `SELECT * FROM payment_orders WHERE session_id = $1 AND provider = 'manual' AND status = 'pending'
+       ORDER BY id DESC LIMIT 1`, [s.id]);
+    if (cur) {
+      const o = await db.one(
+        `UPDATE payment_orders SET method = $2, amount = $3, message = $4, updated_at = now(),
+           expires_at = now() + make_interval(hours => $5) WHERE id = $1 RETURNING *`,
+        [cur.id, method, amount, waitingMessage(method), MANUAL_TTL_HOURS]);
+      if (live) live.bump();
+      return res.json(await manualOut(o));
+    }
+    const orderId = `SP${s.id}${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+    const o = await db.one(
+      `INSERT INTO payment_orders (order_id, request_id, session_id, user_id, provider, method, amount, result_code, message, expires_at)
+       VALUES ($1, $1, $2, $3, 'manual', $4, $5, 1000, $6, now() + make_interval(hours => $7)) RETURNING *`,
+      [orderId, s.id, req.user.id, method, amount, waitingMessage(method), MANUAL_TTL_HOURS]);
+    if (live) live.bump();
+    res.status(201).json(await manualOut(o));
+  }));
+
+  const PENDING_SELECT = `
+    SELECT o.*, ps.reservation_id, s.slot_number, s.zone, s.lot_id, l.name AS lot_name, veh.plate_number AS vehicle_plate,
+           veh.vehicle_type, u.full_name AS user_name, u.phone AS user_phone, ps.ended_at, ps.exited_at
+    FROM payment_orders o
+    JOIN parking_sessions ps ON ps.id = o.session_id
+    JOIN slots s ON s.id = ps.slot_id
+    JOIN parking_lots l ON l.id = s.lot_id
+    LEFT JOIN vehicles veh ON veh.id = ps.vehicle_id
+    LEFT JOIN users u ON u.id = o.user_id`;
+  const pendingView = (o) => ({
+    orderId: o.order_id, sessionId: o.session_id, reservationId: o.reservation_id, method: o.method,
+    methodLabel: MANUAL_LABEL[o.method] || o.method, amount: o.amount, content: o.order_id, status: o.status,
+    lotId: o.lot_id, lotName: o.lot_name, slotNumber: o.slot_number, zone: o.zone,
+    vehiclePlate: o.vehicle_plate, vehicleType: o.vehicle_type, userName: o.user_name, userPhone: o.user_phone,
+    createdAt: o.created_at, updatedAt: o.updated_at,
+  });
+
+  r.get('/payments/pending', admin, wrap(async (req, res) => {
+    const lotId = v.str(req.query, 'lotId', { max: 50, optional: true });
+    const { rows } = await db.query(
+      `${PENDING_SELECT} WHERE o.provider = 'manual' AND o.status = 'pending' AND o.expires_at > now()
+         AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.session_id = o.session_id)
+         AND ($1::text IS NULL OR s.lot_id = $1)
+       ORDER BY o.updated_at DESC LIMIT 50`, [lotId]);
+    res.json(rows.map(pendingView));
+  }));
+
+  // Admin da nhan tien -> ghi giao dich (1 lan, chong bam 2 lan) -> mo barie cong ra neu xe dang cho ra
+  r.post('/payments/orders/:orderId/confirm', admin, wrap(async (req, res) => {
+    const openGate = req.body?.openGate !== false;
+    const claimed = await db.one(
+      `UPDATE payment_orders SET status = 'paid', result_code = 0, message = 'Admin đã xác nhận nhận tiền', updated_at = now()
+       WHERE order_id = $1 AND provider = 'manual' AND status = 'pending' RETURNING *`, [String(req.params.orderId)]);
+    if (!claimed) {
+      const o = await db.one('SELECT status FROM payment_orders WHERE order_id = $1', [String(req.params.orderId)]);
+      if (!o) throw notFound('order_not_found', 'Khong tim thay don thanh toan');
+      throw conflict(o.status === 'paid' ? 'already_paid' : 'order_not_pending', 'Don nay da duoc xu ly');
+    }
+    const s = await loadSession(claimed.session_id);
+    let p;
+    try {
+      p = await recordPayment(db, s, {
+        userId: s.owner_id || null, method: claimed.method, provider: claimed.method === 'cash' ? 'cash' : 'transfer',
+        collectedBy: req.user.id, orderId: claimed.order_id,
+      });
+    } catch (e) {
+      if (e.code !== 'already_paid') {
+        await db.query(`UPDATE payment_orders SET status = 'pending', result_code = 1000, message = $2 WHERE id = $1`,
+          [claimed.id, waitingMessage(claimed.method)]);
+        throw e;
+      }
+      p = await db.one(`${PAYMENT_SELECT} WHERE p.session_id = $1`, [s.id]); // da tra bang cach khac
+    }
+    await db.query('UPDATE payment_orders SET payment_id = $2 WHERE id = $1', [claimed.id, p.id]);
+    await audit(db, req, 'payment.confirm', 'session', s.id, { orderId: claimed.order_id, method: claimed.method, amount: p.amount });
+    const gate = openGate && gateOps ? await gateOps.openExitAfterPayment(s, req.user.id) : { opened: false, reason: 'skipped' };
+    if (live) live.bump();
+    res.json({ ok: true, payment: view(await loadPayment(p.id)), gate });
+  }));
+
+  r.post('/payments/orders/:orderId/reject', admin, wrap(async (req, res) => {
+    const reason = v.str(req.body, 'reason', { max: 200, optional: true }) || 'Chưa nhận được tiền – vui lòng kiểm tra lại';
+    const o = await db.one(
+      `UPDATE payment_orders SET status = 'failed', result_code = 1006, message = $2, updated_at = now()
+       WHERE order_id = $1 AND provider = 'manual' AND status = 'pending' RETURNING *`, [String(req.params.orderId), reason]);
+    if (!o) throw conflict('order_not_pending', 'Don nay da duoc xu ly hoac khong ton tai');
+    await audit(db, req, 'payment.reject', 'session', o.session_id, { orderId: o.order_id, reason });
+    if (live) live.bump();
+    res.json(await orderOut(o));
+  }));
 
   r.post('/sessions/:id/checkout', user, wrap(async (req, res) => {
     const id = v.int(req.params, 'id', { min: 1 });
@@ -129,7 +269,7 @@ module.exports = function paymentRoutes({ db, auth, gateway, publicUrl, receiptS
     let o = await db.one('SELECT * FROM payment_orders WHERE order_id = $1', [String(req.params.orderId)]);
     if (!o || (o.user_id !== req.user.id && req.user.role !== 'admin')) throw notFound('order_not_found', 'Khong tim thay don thanh toan');
     o = await refreshOrder(o);
-    res.json(await orderOut(o));
+    res.json(o.provider === 'manual' ? await manualOut(o) : await orderOut(o));
   }));
 
   // MoMo -> may chu: ket qua thanh toan (xac thuc chu ky, idempotent). Luon tra 204 de MoMo khong gui lai vo han.
@@ -210,7 +350,13 @@ module.exports = function paymentRoutes({ db, auth, gateway, publicUrl, receiptS
       userId: s.owner_id || null, method, provider: method === 'cash' ? 'cash' : 'mock', collectedBy: req.user.id,
     });
     await audit(db, req, 'session.collect', 'session', s.id, { method, amount: p?.amount });
-    res.status(201).json(view(p));
+    // Tai xe dang co don tra truc tiep cho xac nhan -> danh dau da tra
+    await db.query(`UPDATE payment_orders SET status = 'paid', payment_id = $2, result_code = 0,
+      message = 'Admin đã xác nhận nhận tiền', updated_at = now()
+      WHERE session_id = $1 AND provider = 'manual' AND status = 'pending'`, [s.id, p.id]);
+    const gate = req.body?.openGate && gateOps ? await gateOps.openExitAfterPayment(s, req.user.id) : undefined;
+    if (live) live.bump();
+    res.status(201).json(gate ? { ...view(p), gate } : view(p));
   }));
 
   return r;

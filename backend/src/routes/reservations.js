@@ -100,9 +100,11 @@ module.exports = function reservationRoutes({ db, auth, device, gatePass }) {
     const ack = await device.sendCommand(row.lot_id, { action: 'extend_reservation', slot: row.slot_number, minutes });
     if (!ack) { await release(); throw new HttpError(504, 'device_timeout', 'Thiet bi khong phan hoi'); }
     if (!ack.ok) { await release(); throw conflict(ack.error || 'device_error', 'Thiet bi tu choi'); }
+    // Moi lan gia han +RULES.extend.fee: cong vao phi du kien, thu chung voi phi gui xe khi ra cong
     const upd = await db.one(
       `UPDATE reservations SET minutes = minutes + $2, expires_at = expires_at + make_interval(mins => $2),
-         updated_at = now() WHERE id = $1 RETURNING *`, [row.id, minutes]);
+         estimated_fee = COALESCE(estimated_fee, 0) + $3, updated_at = now() WHERE id = $1 RETURNING *`,
+      [row.id, minutes, RULES.extend.fee]);
     res.json(map.reservation({ ...row, ...upd }));
   }));
 

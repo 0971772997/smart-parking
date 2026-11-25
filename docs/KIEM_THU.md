@@ -95,6 +95,22 @@ Các nhóm test chính: đăng ký/đăng nhập, phân quyền, đặt chỗ (t
 | App `tests/gateVehicle.test.mjs` (nhận diện mã cổng, thông báo lỗi tài xế, loại xe, biển số) | `mobile/ npm test` **39/39 PASS** |
 | Chrome (API local + ESP32 giả lập): admin mở "Mã QR tại cổng" → tài xế nhập mã cổng VÀO → barie mở, khu B ô #3, xe 43A-123.45 gắn vào đặt chỗ; cổng RA chưa trả phí → màn cam "Chưa thanh toán 10.000đ"; admin bấm "Đã thu tiền mặt" → tài xế quét lại → màn cổng hiện "Hẹn gặp lại!"; thêm xe máy `43-b1 678.90` → lưu `43-B1 678.90` | Đạt. Chưa thử camera thật trên điện thoại |
 
+### 1.6 Một mã QR chung + thanh toán tiền mặt / chuyển khoản / MoMo do nhân viên xác nhận (25/11/2026)
+
+| Kiểm tra | Kết quả |
+|---|---|
+| `backend/tests/manualpay.test.js` (8 test): mã chung `G`; cùng 1 mã lần đầu → VÀO, sau đó → RA (`still_parked`, 402); cấu hình tài khoản nhận tiền; chọn tiền mặt rồi đổi sang chuyển khoản giữ mã đơn, VietQR đúng BIN 970422 / STK / số tiền / nội dung / CRC; tài xế không tự xác nhận (403); admin xác nhận → giao dịch + barie ra mở; bấm lại → 409; "Chưa nhận được" → đơn thất bại; `openGate=false`; nút thu tiền mặt cũ đánh dấu đơn chờ + mở cổng | **8/8 PASS** |
+| `tests/unit/vietqr.test.js`: CRC16 vector chuẩn `123456789 → 29B1`, cấu trúc VietQR, nội dung bỏ dấu | **3/3 PASS** |
+| Backend toàn bộ (`npm test`) | **313/313 PASS** |
+| Chrome (API local + ESP32 giả lập): tài xế quét mã chung ở cổng ra → màn "Chưa thanh toán 10.000đ" có nút Trả tiền mặt / Chuyển khoản – MoMo → mã VietQR MB 0971772997 VO VIET MINH, nội dung SPxxxx → admin thấy "Thanh toán chờ xác nhận" → "Đã nhận tiền – mở cổng" → barie ra mở, "Hẹn gặp lại!", đơn của tài xế `paid` + biên nhận | Đạt. Lỗi tìm thấy và đã sửa: app gửi `gate=undefined` khi lấy mã chung → 400 |
+
+### 1.7 Phí gia hạn giữ chỗ 5.000đ/lần (25/11/2026)
+
+| Kiểm tra | Kết quả |
+|---|---|
+| `manualpay.test.js` (+2 test): gia hạn 2 lần → phí dự kiến +10.000đ; vào bãi → phí tạm tính có `holdFee` 10.000đ; rời ô → phí chốt gồm 10.000đ, cổng ra báo 402 đúng số tiền; trả tiền mặt → biên nhận có dòng "Phí gia hạn giữ chỗ (2 lần × 5.000đ)"; không gia hạn → 0đ | **PASS** |
+| `tests/unit/fees.test.js` (+1): phí giữ chỗ luôn cộng vào tổng, kể cả vào rồi ra miễn phí trong ân hạn | **PASS** |
+
 ## 2. Kiểm thử end-to-end với Wokwi (API thật + broker + ESP32 mô phỏng)
 
 ### 2.1 Bằng script `backend/scripts/e2e.js` (19/11/2026)

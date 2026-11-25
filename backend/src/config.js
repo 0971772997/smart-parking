@@ -41,6 +41,14 @@ module.exports = {
       accessKey: process.env.MOMO_ACCESS_KEY || undefined,
       secretKey: process.env.MOMO_SECRET_KEY || undefined,
     },
+    // Tai khoan NHAN TIEN cho thanh toan chuyen khoan / vi MoMo (admin xac nhan da nhan tien roi mo cong)
+    payee: {
+      bankName: process.env.PAY_BANK_NAME || 'MB Bank',
+      bankBin: process.env.PAY_BANK_BIN || '970422', // ma BIN NAPAS cua MB Bank
+      accountNo: process.env.PAY_ACCOUNT_NO || '0971772997',
+      accountName: process.env.PAY_ACCOUNT_NAME || 'VO VIET MINH',
+      momoPhone: process.env.PAY_MOMO_PHONE || '0971772997',
+    },
     // Thanh toan gia lap tuc thi (khong qua cong): mac dinh tat tren production
     allowMock: process.env.ALLOW_MOCK_PAYMENTS ? process.env.ALLOW_MOCK_PAYMENTS === 'true' : process.env.NODE_ENV !== 'production',
   },

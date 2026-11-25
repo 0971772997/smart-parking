@@ -1,14 +1,18 @@
-// THANH TOAN PHI GUI XE qua cong MoMo (moi truong thu nghiem):
-//   chi tiet cac khoan phi -> chon phuong thuc (vi MoMo / the ATM / Visa-Master) -> mo trang thanh toan MoMo
-//   -> cho xac nhan (may chu nhan IPN hoac tu hoi MoMo) -> ket qua: thanh cong (bien nhan) / that bai (ly do, thu lai)
+// THANH TOAN PHI GUI XE - tra truc tiep cho bai, NHAN VIEN XAC NHAN da nhan tien roi barie cong ra tu mo:
+//   - Tien mat: dua tien cho nhan vien tai cong
+//   - Chuyen khoan ngan hang: quet ma VietQR (MB Bank) - dien san so tai khoan, so tien, noi dung
+//   - Vi MoMo: chuyen tien vao so MoMo cua bai (hoac dung MoMo quet ma VietQR)
+// Chi tiet phi -> chon phuong thuc -> don cho xac nhan (noi dung CK = ma don) -> admin xac nhan -> ket qua + bien nhan.
 // Dang cho ma tat app -> mo lai man hinh se tiep tuc theo doi don cu (luu ma don tren may).
-// params: { sessionId }
+// params: { sessionId, method?, auto? }  (auto + method: tao don ngay, vd bam 'Tra tien mat' o man quet ma tai cong)
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 import * as WebBrowser from 'expo-web-browser';
+import QRCode from 'react-native-qrcode-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Button from '../../components/Button';
 import Notice from '../../components/Notice';
@@ -17,29 +21,32 @@ import { paymentsApi } from '../../api/payments';
 import { sessionsApi } from '../../api/sessions';
 import { useOnLiveChange } from '../../context/LiveContext';
 import { colors, radius } from '../../theme';
-import { formatClock, formatCountdown, formatDateTime } from '../../utils/booking';
+import { formatClock, formatDateTime } from '../../utils/booking';
 import { formatVND } from '../../utils/schedules';
 import { formatElapsed } from '../../utils/session';
 
 const METHODS = [
-  { key: 'momo', label: 'Ví MoMo', sub: 'Quét QR / mở app MoMo', icon: 'wallet', color: '#A50064' },
-  { key: 'atm', label: 'Thẻ ATM nội địa', sub: 'Napas – thẻ ngân hàng Việt Nam', icon: 'card', color: '#0E7490' },
-  { key: 'card', label: 'Thẻ Visa / Master', sub: 'Thẻ tín dụng, ghi nợ quốc tế', icon: 'card-outline', color: '#1D4ED8' },
+  { key: 'cash', label: 'Tiền mặt', sub: 'Trả cho nhân viên tại cổng ra', icon: 'cash-outline', color: '#16A34A' },
+  { key: 'bank', label: 'Chuyển khoản ngân hàng', sub: 'Quét mã VietQR bằng app ngân hàng', icon: 'business-outline', color: '#1D4ED8' },
+  { key: 'momo', label: 'Ví MoMo', sub: 'Chuyển tiền vào ví MoMo của bãi', icon: 'wallet', color: '#A50064' },
 ];
 const POLL_MS = 3000;
 const orderKey = (sid) => `sp_pay_order_${sid}`;
 
 export default function PaymentScreen({ navigation, route }) {
-  const { sessionId } = route.params || {};
+  const { sessionId, method: presetMethod, auto } = route.params || {};
   const [s, setS] = useState(null);
   const [cfg, setCfg] = useState(null);
-  const [method, setMethod] = useState('momo');
+  const [method, setMethod] = useState(presetMethod || 'cash');
   const [order, setOrder] = useState(null);      // don dang xu ly / ket qua
   const [phase, setPhase] = useState('loading'); // loading | choose | waiting | paid | failed
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const [now, setNow] = useState(() => Date.now());
+  const [copied, setCopied] = useState(null);
+  const [now] = useState(() => Date.now());
   const polling = useRef(false);
+  const copyTimer = useRef(null);
+  const autoDone = useRef(false);
 
   const applyOrder = useCallback((o) => {
     setOrder(o);
@@ -83,41 +90,57 @@ export default function PaymentScreen({ navigation, route }) {
         if (alive) { setError(e.message); setPhase('choose'); }
       }
     })();
-    return () => { alive = false; };
+    return () => { alive = false; clearTimeout(copyTimer.current); };
   }, [sessionId, poll]);
 
-  // Dang cho MoMo xac nhan (hoac da thanh cong nhung bien nhan dang duoc tao): hoi lai moi 3 giay
+  // Dang cho nhan vien xac nhan (hoac da xong nhung bien nhan dang duoc tao): hoi lai moi 3 giay
   const waiting = (phase === 'waiting' || (phase === 'paid' && !order?.payment)) && order?.orderId;
   useEffect(() => {
     if (!waiting) return undefined;
     const t = setInterval(() => poll(order.orderId), POLL_MS);
-    const tick = setInterval(() => setNow(Date.now()), 1000);
-    return () => { clearInterval(t); clearInterval(tick); };
+    return () => clearInterval(t);
   }, [waiting, order?.orderId, poll]);
   const waitingId = phase === 'waiting' ? order?.orderId : null;
   useOnLiveChange(useCallback(() => { if (waitingId) poll(waitingId); }, [waitingId, poll]));
 
-  async function openGateway(o) {
-    if (!o?.payUrl) return;
-    if (Platform.OS === 'web') { globalThis.open?.(o.payUrl, '_blank'); return; }
-    await WebBrowser.openBrowserAsync(o.payUrl, { dismissButtonStyle: 'close', toolbarColor: '#A50064' }).catch(() => {});
-    poll(o.orderId); // dong trinh duyet -> kiem tra ngay
-  }
-
-  async function pay() {
+  async function pay(m = method) {
     setBusy(true);
     setError(null);
     try {
-      const o = await paymentsApi.checkout(sessionId, method);
+      const o = await paymentsApi.manualPay(sessionId, m);
       AsyncStorage.setItem(orderKey(sessionId), o.orderId).catch(() => {});
       applyOrder(o);
-      openGateway(o);
     } catch (e) {
       if (e.code === 'already_paid' || e.code === 'no_payment_needed') navigation.replace('SessionDetail', { id: sessionId });
       else setError(e.message);
     } finally {
       setBusy(false);
     }
+  }
+
+  // Mo tu cong ra voi phuong thuc chon san -> tao don ngay (khong bat chon lai)
+  useEffect(() => {
+    if (!auto || !presetMethod || phase !== 'choose' || autoDone.current) return;
+    autoDone.current = true;
+    const t = setTimeout(() => pay(presetMethod), 0);
+    return () => clearTimeout(t);
+  });
+
+  async function copy(label, value) {
+    try {
+      await Clipboard.setStringAsync(String(value));
+      setCopied(label);
+      clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopied(null), 2000);
+    } catch { /* khong ho tro clipboard -> bo qua */ }
+  }
+
+  // Don cong MoMo thu nghiem cu (truoc khi doi sang tra truc tiep) -> mo lai trang thanh toan
+  async function openGateway(o) {
+    if (!o?.payUrl) return;
+    if (Platform.OS === 'web') { globalThis.open?.(o.payUrl, '_blank'); return; }
+    await WebBrowser.openBrowserAsync(o.payUrl, { dismissButtonStyle: 'close' }).catch(() => {});
+    poll(o.orderId);
   }
 
   const header = (
@@ -143,7 +166,7 @@ export default function PaymentScreen({ navigation, route }) {
   }
 
   const amount = order?.amount ?? s.amountDue ?? s.cost.total;
-  const sandbox = cfg?.sandbox !== false;
+  const payee = order?.payInfo || cfg?.manual?.payee;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -152,12 +175,6 @@ export default function PaymentScreen({ navigation, route }) {
         {header}
         <OfflineBanner />
         <ScrollView contentContainerStyle={styles.content}>
-          {sandbox ? (
-            <View style={styles.sandbox}>
-              <Ionicons name="flask" size={15} color="#92400E" />
-              <Text style={styles.sandboxText}>MÔI TRƯỜNG THỬ NGHIỆM MoMo – không trừ tiền thật</Text>
-            </View>
-          ) : null}
           {error ? <Notice type="error">{error}</Notice> : null}
 
           {phase === 'paid' ? (
@@ -165,30 +182,12 @@ export default function PaymentScreen({ navigation, route }) {
               onReceipt={order?.payment?.id ? () => navigation.replace('Receipt', { paymentId: order.payment.id }) : null}
               onBack={() => navigation.replace('SessionDetail', { id: sessionId })} />
           ) : phase === 'failed' ? (
-            <Result title={order?.status === 'expired' ? 'Đơn thanh toán đã hết hạn' : 'Thanh toán chưa thành công'}
+            <Result title={order?.status === 'expired' ? 'Đơn thanh toán đã hết hạn' : 'Thanh toán chưa được xác nhận'}
               amount={amount} order={order}
               onRetry={() => { setOrder(null); setPhase('choose'); }} />
-          ) : phase === 'waiting' ? (
-            <View style={styles.card}>
-              <View style={styles.waitHead}>
-                <ActivityIndicator color="#A50064" />
-                <Text style={styles.waitTitle}>Đang chờ xác nhận từ MoMo…</Text>
-              </View>
-              <Text style={styles.waitAmount}>{formatVND(amount)}</Text>
-              <Text style={styles.muted}>{order?.methodLabel} • Mã đơn {order?.orderId}</Text>
-              {order?.expiresAt ? (
-                <Text style={styles.muted}>Đơn hết hạn sau {formatCountdown(Math.max(0, Math.floor((new Date(order.expiresAt) - now) / 1000)))}</Text>
-              ) : null}
-              <Text style={styles.waitHint}>
-                Hoàn tất thanh toán trên trang MoMo vừa mở. Kết quả sẽ tự cập nhật tại đây.
-              </Text>
-              {sandbox && cfg?.hints?.[order?.method] ? <Text style={styles.hintBox}>{cfg.hints[order.method]}</Text> : null}
-              <Button title="Mở lại trang thanh toán" onPress={() => openGateway(order)} style={{ marginTop: 12 }} />
-              <Button title="Tôi đã thanh toán – kiểm tra ngay" variant="outline" onPress={() => poll(order.orderId)} style={{ marginTop: 8 }} />
-              <Pressable onPress={() => { setPhase('choose'); }} style={styles.link}>
-                <Text style={styles.linkText}>Chọn phương thức khác</Text>
-              </Pressable>
-            </View>
+          ) : phase === 'waiting' && order ? (
+            <Waiting order={order} amount={amount} payee={payee} copied={copied} onCopy={copy}
+              onCheck={() => poll(order.orderId)} onChange={() => setPhase('choose')} onGateway={openGateway} />
           ) : null}
 
           {/* CHI TIET CAC KHOAN PHI */}
@@ -197,7 +196,7 @@ export default function PaymentScreen({ navigation, route }) {
           {phase === 'choose' ? (
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Phương thức thanh toán</Text>
-              {METHODS.filter((m) => !cfg || cfg.methods.includes(m.key)).map((m) => {
+              {METHODS.map((m) => {
                 const on = method === m.key;
                 return (
                   <Pressable key={m.key} onPress={() => setMethod(m.key)} style={[styles.method, on && styles.methodOn]}
@@ -213,16 +212,109 @@ export default function PaymentScreen({ navigation, route }) {
                   </Pressable>
                 );
               })}
-              {sandbox && cfg?.hints?.[method] ? <Text style={styles.hintBox}>{cfg.hints[method]}</Text> : null}
-              <Button title={`Thanh toán ${formatVND(amount)}`} onPress={pay} loading={busy} disabled={!amount} style={{ marginTop: 12 }} />
+              {method !== 'cash' && payee ? (
+                <Text style={styles.hintBox}>
+                  Tiền chuyển vào tài khoản {payee.accountName} • {method === 'momo' ? `MoMo ${payee.momoPhone}` : `${payee.bankName} ${payee.accountNo}`}.
+                </Text>
+              ) : null}
+              <Button title={method === 'cash' ? `Trả tiền mặt ${formatVND(amount)}` : `Tiếp tục – ${formatVND(amount)}`}
+                onPress={() => pay()} loading={busy} disabled={!amount} style={{ marginTop: 12 }} />
               <Text style={styles.secure}>
-                <Ionicons name="lock-closed" size={11} color={colors.textMuted} /> Thông tin thẻ được nhập trên trang của MoMo, SmartPark không lưu thông tin thẻ.
+                <Ionicons name="shield-checkmark-outline" size={11} color={colors.textMuted} /> Nhân viên xác nhận đã nhận tiền thì barie cổng ra tự mở.
               </Text>
             </View>
           ) : null}
         </ScrollView>
       </View>
     </SafeAreaView>
+  );
+}
+
+// Dang cho nhan vien xac nhan: huong dan tra tien theo phuong thuc + thong tin chuyen khoan
+function Waiting({ order, amount, payee, copied, onCopy, onCheck, onChange, onGateway }) {
+  const info = order.payInfo;
+  const cash = order.method === 'cash';
+  const momo = order.method === 'momo';
+  if (order.provider && order.provider !== 'manual') {
+    return (
+      <View style={styles.card}>
+        <View style={styles.waitHead}>
+          <ActivityIndicator color="#A50064" />
+          <Text style={styles.waitTitle}>Đang chờ xác nhận từ MoMo…</Text>
+        </View>
+        <Text style={styles.waitAmount}>{formatVND(amount)}</Text>
+        <Button title="Mở lại trang thanh toán" onPress={() => onGateway(order)} style={{ marginTop: 12 }} />
+        <Pressable onPress={onChange} style={styles.link}><Text style={styles.linkText}>Chọn phương thức khác</Text></Pressable>
+      </View>
+    );
+  }
+  return (
+    <View style={styles.card}>
+      <View style={styles.waitHead}>
+        <ActivityIndicator color={colors.primary} />
+        <Text style={styles.waitTitle}>Đang chờ nhân viên xác nhận…</Text>
+      </View>
+      <Text style={styles.waitAmount}>{formatVND(amount)}</Text>
+      <Text style={styles.muted}>{order.methodLabel || (cash ? 'Tiền mặt' : momo ? 'Ví MoMo' : 'Chuyển khoản')} • Mã đơn {order.orderId}</Text>
+
+      {cash ? (
+        <Text style={styles.waitHint}>
+          Đưa <Text style={styles.strong}>{formatVND(amount)}</Text> cho nhân viên tại cổng ra và đọc mã đơn{' '}
+          <Text style={styles.strong}>{order.orderId}</Text>. Nhân viên xác nhận xong, barie sẽ tự mở.
+        </Text>
+      ) : info ? (
+        <>
+          <View style={styles.qrBox}>
+            <QRCode value={info.vietqr} size={190} ecl="M" color={colors.navy} backgroundColor="#FFFFFF" />
+          </View>
+          <Text style={styles.muted}>
+            {momo ? 'Mở MoMo ▸ Quét mã, hoặc chuyển tiền tới số ví bên dưới' : 'Mở app ngân hàng / MoMo ▸ Quét mã QR'}
+          </Text>
+          <View style={styles.infoBox}>
+            {momo ? (
+              <CopyLine label="Số ví MoMo" value={info.momoPhone} copied={copied} onCopy={onCopy} />
+            ) : (
+              <>
+                <InfoLine label="Ngân hàng" value={info.bankName} />
+                <CopyLine label="Số tài khoản" value={info.accountNo} copied={copied} onCopy={onCopy} />
+              </>
+            )}
+            <InfoLine label="Chủ tài khoản" value={info.accountName} />
+            <CopyLine label="Số tiền" value={String(info.amount)} display={formatVND(info.amount)} copied={copied} onCopy={onCopy} />
+            <CopyLine label="Nội dung" value={info.content} copied={copied} onCopy={onCopy} />
+          </View>
+          <Text style={styles.warn}>Ghi đúng nội dung <Text style={styles.strong}>{info.content}</Text> để nhân viên đối chiếu nhanh.</Text>
+          {momo && Platform.OS !== 'web' ? (
+            <Button title="Mở app MoMo" variant="outline" onPress={() => Linking.openURL('momo://').catch(() => {})} style={{ marginTop: 10 }} />
+          ) : null}
+        </>
+      ) : payee ? <Text style={styles.waitHint}>Chuyển {formatVND(amount)} tới {payee.accountName}.</Text> : null}
+
+      <Button title={cash ? 'Kiểm tra trạng thái' : 'Tôi đã chuyển tiền – kiểm tra'} variant="outline" onPress={onCheck} style={{ marginTop: 12 }} />
+      <Pressable onPress={onChange} style={styles.link}><Text style={styles.linkText}>Đổi phương thức thanh toán</Text></Pressable>
+    </View>
+  );
+}
+
+function InfoLine({ label, value }) {
+  return (
+    <View style={styles.line}>
+      <Text style={styles.lineLabel}>{label}</Text>
+      <Text style={styles.lineValue}>{value}</Text>
+    </View>
+  );
+}
+
+function CopyLine({ label, value, display, copied, onCopy }) {
+  const done = copied === label;
+  return (
+    <Pressable onPress={() => onCopy(label, value)} style={styles.line} accessibilityLabel={`Sao chép ${label}`}>
+      <Text style={styles.lineLabel}>{label}</Text>
+      <View style={styles.copyRight}>
+        <Text style={styles.lineValue}>{display || value}</Text>
+        <Ionicons name={done ? 'checkmark' : 'copy-outline'} size={15} color={done ? colors.success : colors.primary} />
+      </View>
+    </Pressable>
   );
 }
 
@@ -240,6 +332,9 @@ function FeeDetails({ s, amount, now }) {
         <Line label={`Phí gửi xe${s.cost.hours ? ` (${s.cost.hours} giờ)` : ''}`} value={formatVND(s.cost.base)} />
       ) : null}
       {s.cost.overtime > 0 ? <Line label="Phụ phí quá giờ dự kiến" value={formatVND(s.cost.overtime)} danger /> : null}
+      {s.cost.holdFee > 0 ? (
+        <Line label={`Phí gia hạn giữ chỗ (${s.cost.holdExtensions} lần)`} value={formatVND(s.cost.holdFee)} />
+      ) : null}
       {s.cost.total === 0 ? <Line label="Miễn phí (rời bãi trong thời gian ân hạn)" value={formatVND(0)} /> : null}
       <View style={styles.sep} />
       <View style={styles.totalRow}>
@@ -281,7 +376,7 @@ function Result({ ok, title, amount, order, onReceipt, onBack, onRetry }) {
       ) : null}
       {ok ? (
         <>
-          <Text style={styles.muted}>Đến cổng ra, dùng app quét mã QR tại cổng, barie sẽ tự mở.</Text>
+          <Text style={styles.muted}>Nếu barie chưa mở, quét mã QR tại cổng bằng app.</Text>
           {onReceipt ? <Button title="Xem biên nhận điện tử" onPress={onReceipt} style={styles.fullBtn} /> : null}
           <Button title="Về phiên gửi xe" variant="outline" onPress={onBack} style={styles.fullBtn} />
         </>
@@ -305,15 +400,14 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 17, fontWeight: '800', color: colors.text },
   headerSub: { fontSize: 12, color: colors.textMuted, marginTop: 1 },
   muted: { fontSize: 12.5, color: colors.textMuted, textAlign: 'center', marginTop: 4 },
-
-  sandbox: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'center', paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.pill, backgroundColor: '#FEF3C7', marginBottom: 12 },
-  sandboxText: { fontSize: 11, fontWeight: '900', color: '#92400E', letterSpacing: 0.3 },
+  strong: { fontWeight: '900', color: colors.text },
 
   card: { backgroundColor: '#fff', borderRadius: radius.lg, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: '#EEF2F7' },
   cardTitle: { fontSize: 14, fontWeight: '800', color: colors.text, marginBottom: 10 },
-  line: { flexDirection: 'row', justifyContent: 'space-between', gap: 10, paddingVertical: 5 },
+  line: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10, paddingVertical: 5 },
   lineLabel: { fontSize: 13, color: colors.textMuted, flexShrink: 1 },
   lineValue: { fontSize: 13.5, fontWeight: '700', color: colors.text, textAlign: 'right', flexShrink: 1 },
+  copyRight: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
   sep: { borderTopWidth: 1, borderStyle: 'dashed', borderColor: '#CBD5E1', marginVertical: 6 },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 },
   totalLabel: { fontSize: 14, fontWeight: '800', color: colors.text },
@@ -324,13 +418,16 @@ const styles = StyleSheet.create({
   methodIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   methodLabel: { fontSize: 14, fontWeight: '800', color: colors.text },
   methodSub: { fontSize: 12, color: colors.textMuted, marginTop: 1 },
-  hintBox: { fontSize: 12, color: '#92400E', backgroundColor: '#FFFBEB', borderRadius: radius.md, padding: 10, marginTop: 6, lineHeight: 17 },
+  hintBox: { fontSize: 12, color: colors.primaryDark, backgroundColor: colors.primarySoft, borderRadius: radius.md, padding: 10, marginTop: 6, lineHeight: 17 },
   secure: { fontSize: 11.5, color: colors.textMuted, textAlign: 'center', marginTop: 10 },
 
   waitHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
-  waitTitle: { fontSize: 15, fontWeight: '800', color: '#A50064' },
+  waitTitle: { fontSize: 15, fontWeight: '800', color: colors.primary },
   waitAmount: { fontSize: 30, fontWeight: '900', color: colors.text, textAlign: 'center', marginTop: 10 },
-  waitHint: { fontSize: 13, color: colors.text, textAlign: 'center', marginTop: 10, lineHeight: 18 },
+  waitHint: { fontSize: 13.5, color: colors.text, textAlign: 'center', marginTop: 10, lineHeight: 19 },
+  qrBox: { alignSelf: 'center', padding: 10, backgroundColor: '#fff', borderRadius: radius.md, borderWidth: 1, borderColor: '#E2E8F0', marginTop: 12 },
+  infoBox: { marginTop: 10, padding: 10, borderRadius: radius.md, backgroundColor: '#F8FAFC' },
+  warn: { fontSize: 12, color: '#92400E', backgroundColor: '#FFFBEB', borderRadius: radius.md, padding: 8, marginTop: 8, textAlign: 'center' },
   link: { alignItems: 'center', paddingVertical: 12 },
   linkText: { color: colors.primary, fontWeight: '700', fontSize: 13.5 },
 

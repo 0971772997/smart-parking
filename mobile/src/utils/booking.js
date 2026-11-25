@@ -6,7 +6,7 @@ export const DEFAULT_RULES = {
   maxActivePerUser: 1,
   hold: { min: 5, max: 120, default: 15, options: [15, 30, 45, 60] },
   duration: { min: 30, max: 1440, default: 120, options: [60, 120, 180, 240, 480] },
-  extend: { maxTimes: 2, min: 5, max: 30, options: [10, 15, 30] },
+  extend: { maxTimes: 2, min: 5, max: 30, options: [10, 15, 30], fee: 5000 }, // moi lan gia han giu cho +5.000d
   graceSeconds: 60,
   noShow: { limit: 3, windowDays: 7, suspendHours: 24 },
   me: { noShows: 0, suspendedUntil: null },

@@ -1,5 +1,5 @@
 // THE QUA CONG (tai xe): huong dan quet ma QR o cong VAO / RA + nut mo man quet ma (GateCheckin).
-// - Cong ra: bao truoc neu xe chua roi o / chua thanh toan -> nut sang man Thanh toan (cong MoMo thu nghiem).
+// - Cong ra: bao truoc neu xe chua roi o / chua thanh toan -> nut sang man Thanh toan (tien mat / chuyen khoan / MoMo, nhan vien xac nhan).
 // props: { resv, onChanged } - onChanged(): yeu cau man cha tai lai dat cho (khi dat cho doi trang thai)
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -84,8 +84,8 @@ export default function GateCheckinCard({ resv, onChanged }) {
             <Text style={styles.payTitle}>Chưa thanh toán phí gửi xe</Text>
             <Text style={styles.payFee}>{formatVND(block.fee)}</Text>
           </View>
-          <Text style={styles.payHint}>Thanh toán trước để barie cổng ra tự mở khi quét mã (hoặc trả tiền mặt cho nhân viên).</Text>
-          <Button title={`Thanh toán ${formatVND(block.fee)} qua MoMo`}
+          <Text style={styles.payHint}>Trả tiền mặt cho nhân viên, chuyển khoản hoặc MoMo. Nhân viên xác nhận đã nhận tiền thì barie cổng ra tự mở.</Text>
+          <Button title={`Thanh toán ${formatVND(block.fee)}`}
             onPress={() => navigate('Payment', { sessionId: block.sessionId })} />
         </View>
       )}

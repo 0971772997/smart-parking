@@ -6,6 +6,7 @@ import { normalizePlate, plateError, vehicleType, vehicleTitle, VEHICLE_TYPES } 
 
 describe('Ma QR cua cong', () => {
   test('Nhan dien ma cong vao / ra, ma dat cho, ma la', () => {
+    assert.deepEqual(classifyQr('SPG1.c3AtZGVtby0wMQ.G.mhx1k2.abcdefgh.0123456789abcdef'), { kind: 'gate', gate: null });
     assert.deepEqual(classifyQr('SPG1.c3AtZGVtby0wMQ.E.mhx1k2.abcdefgh.0123456789abcdef'), { kind: 'gate', gate: 'entry' });
     assert.deepEqual(classifyQr(' SPG1.c3A.X.mhx1k2.abcdefgh.0123456789abcdef '), { kind: 'gate', gate: 'exit' });
     assert.deepEqual(classifyQr('SP1.1.E.mhx1k2.abcdefgh.0123456789abcdef'), { kind: 'reservation' });

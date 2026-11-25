@@ -16,7 +16,7 @@
 //     kiem tra nhu khi nhan vien quet -> mo barie.
 const crypto = require('crypto');
 const { RULES } = require('./booking');
-const { sessionFee, startGateSession, closeSession, notify, vnd } = require('./sessions');
+const { sessionFee, holdFeeOf, startGateSession, closeSession, notify, vnd } = require('./sessions');
 
 const VERSION = 'SP1';
 const GATE_VERSION = 'SPG1'; // ma QR cua CONG (admin hien tai cong, tai xe quet) - xem issueGate
@@ -57,11 +57,12 @@ function createGatePass(secret) {
 
   // Ma QR hien tai cong (cho tai xe quet). Chu ky co tien to rieng -> khong doi lan voi ma dat cho.
   const gsig = (body) => sig(`gate|${body}`);
-  function issueGate(lotId, gate, ttlSeconds = RULES.gate.gateQrTtlSeconds) {
+  // gate: 'any' (mac dinh - 1 ma chung cho ca vao va ra, may chu tu chon cong) | 'entry' | 'exit'
+  function issueGate(lotId, gate = 'any', ttlSeconds = RULES.gate.gateQrTtlSeconds) {
     const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
     const nonce = crypto.randomBytes(6).toString('base64url');
     const lot64 = Buffer.from(String(lotId)).toString('base64url');
-    const body = [GATE_VERSION, lot64, GATE_CODE[gate], exp.toString(36), nonce].join('.');
+    const body = [GATE_VERSION, lot64, gate === 'any' ? 'G' : GATE_CODE[gate], exp.toString(36), nonce].join('.');
     return { token: `${body}.${gsig(body)}`, lotId, gate, nonce, expiresAt: new Date(exp * 1000), ttlSeconds };
   }
 
@@ -75,8 +76,9 @@ function createGatePass(secret) {
     if (got.length !== expected.length || !crypto.timingSafeEqual(got, expected)) return { ok: false, error: 'qr_invalid' };
     const lotId = Buffer.from(lot64, 'base64url').toString('utf8');
     const exp = parseInt(expS, 36);
-    const gate = CODE_GATE[g];
-    if (!gate || !lotId || !Number.isSafeInteger(exp)) return { ok: false, error: 'qr_invalid' };
+    // G = ma chung -> gate null: may chu tu chon cong vao / ra theo dat cho cua tai xe
+    const gate = g === 'G' ? null : CODE_GATE[g];
+    if ((g !== 'G' && !gate) || !lotId || !Number.isSafeInteger(exp)) return { ok: false, error: 'qr_invalid' };
     const base = { lotId, gate, nonce, expiresAt: new Date(exp * 1000) };
     // Du phong 10s: man hinh cong vua doi ma dung luc tai xe dang quet
     if (exp + 10 < Date.now() / 1000) return { ok: false, error: 'qr_expired', ...base };
@@ -89,9 +91,11 @@ function createGatePass(secret) {
 // Luot do gan nhat cua dat cho (kem thanh toan) -> de kiem tra cong ra
 async function lastSession(db, reservationId) {
   return db.one(
-    `SELECT ps.*, p.id AS payment_id, COALESCE(ps.hourly_rate, l.price_per_hour) AS price_per_hour
+    `SELECT ps.*, p.id AS payment_id, COALESCE(ps.hourly_rate, l.price_per_hour) AS price_per_hour,
+            COALESCE(r.extend_count, 0) AS hold_extensions
      FROM parking_sessions ps LEFT JOIN payments p ON p.session_id = ps.id
      JOIN slots s ON s.id = ps.slot_id JOIN parking_lots l ON l.id = s.lot_id
+     LEFT JOIN reservations r ON r.id = ps.reservation_id
      WHERE ps.reservation_id = $1 ORDER BY ps.started_at DESC LIMIT 1`, [reservationId]);
 }
 
@@ -130,7 +134,8 @@ async function exitBlock(db, reservationId) {
   if (!s || s.payment_id) return null;
   if (!s.ended_at) {
     if (s.parked_at) return { error: 'still_parked', sessionId: s.id, fee: null };
-    const fee = sessionFee({ startedAt: s.started_at, pricePerHour: s.price_per_hour, plannedEndAt: s.planned_end_at, parked: false });
+    const fee = sessionFee({ startedAt: s.started_at, pricePerHour: s.price_per_hour, plannedEndAt: s.planned_end_at,
+      parked: false, holdFee: holdFeeOf(s) });
     return fee.total > 0 ? { error: 'payment_required', sessionId: s.id, fee: fee.total } : null;
   }
   if ((s.fee || 0) > 0) return { error: 'payment_required', sessionId: s.id, fee: s.fee };

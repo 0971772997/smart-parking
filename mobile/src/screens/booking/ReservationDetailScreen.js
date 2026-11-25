@@ -98,7 +98,7 @@ export default function ReservationDetailScreen({ navigation, route }) {
     try {
       const r = await reservationsApi.extend(resv.id, minutes);
       setResv(r);
-      setNotice({ type: 'success', text: `Đã gia hạn thêm ${minutes} phút. Giữ chỗ đến ${formatClock(r.expiresAt)}.` });
+      setNotice({ type: 'success', text: `Đã gia hạn thêm ${minutes} phút (+${formatVND(rules.extend.fee ?? 5000)}, cộng vào phí gửi xe). Giữ chỗ đến ${formatClock(r.expiresAt)}.` });
     } catch (e) {
       setNotice({ type: 'error', text: e.message });
       if (e.code === 'reservation_not_active' || e.code === 'reservation_expired') load();
@@ -272,7 +272,7 @@ export default function ReservationDetailScreen({ navigation, route }) {
                   <Pressable key={m} onPress={() => extend(m)} disabled={extending != null}
                     style={({ pressed }) => [styles.extBtn, pressed && { opacity: 0.8 }, extending != null && extending !== m && { opacity: 0.5 }]}>
                     {extending === m ? <ActivityIndicator size="small" color={colors.primary} />
-                      : <Text style={styles.extText}>+{m} phút</Text>}
+                      : <Text style={styles.extText}>+{m} phút • {formatVND(rules.extend.fee ?? 5000)}</Text>}
                   </Pressable>
                 ))}
               </View>
@@ -282,7 +282,8 @@ export default function ReservationDetailScreen({ navigation, route }) {
               </Text>
             )}
             <Text style={styles.hint}>
-              Còn {Math.max(0, rules.extend.maxTimes - (resv.extendCount || 0))} lần gia hạn • mỗi lần tối đa {rules.extend.max} phút.
+              Còn {Math.max(0, rules.extend.maxTimes - (resv.extendCount || 0))} lần gia hạn • mỗi lần tối đa {rules.extend.max} phút •{' '}
+              <Text style={styles.feeNote}>phí {formatVND(rules.extend.fee ?? 5000)}/lần</Text>, cộng vào phí gửi xe khi ra cổng.
             </Text>
           </View>
         )}
@@ -370,6 +371,7 @@ const styles = StyleSheet.create({
   content: { padding: 16, paddingBottom: 40, backgroundColor: '#F8FAFC', flexGrow: 1 },
   muted: { fontSize: 13, color: colors.textMuted },
   hint: { fontSize: 12, color: colors.textMuted, marginTop: 10 },
+  feeNote: { fontWeight: '800', color: colors.text },
 
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
   iconBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center' },

@@ -10,7 +10,9 @@ const express = require('express');
 const { wrap, badRequest, notFound, conflict } = require('../errors');
 const v = require('../validate');
 const { RULES } = require('../booking');
-const { SESSION_SELECT, ACTIVE_WHERE, refreshAlerts, sessionView, notify, sessionFee, vnd, hhmm } = require('../sessions');
+const {
+  SESSION_SELECT, ACTIVE_WHERE, refreshAlerts, sessionView, notify, sessionFee, holdFeeOf, vnd, hhmm,
+} = require('../sessions');
 
 const notification = (n) => ({
   id: Number(n.id), type: n.type, title: n.title, body: n.body, data: n.data,
@@ -77,7 +79,8 @@ module.exports = function sessionRoutes({ db, auth }) {
       if (cur.extend_count >= ext.maxTimes) throw conflict('extend_limit', `Chi duoc gia han toi da ${ext.maxTimes} lan`);
       throw conflict('extend_too_long', `Tong thoi gian gui toi da ${ext.maxTotalMinutes / 60} gio`);
     }
-    const planned = sessionFee({ startedAt: upd.started_at, endAt: upd.planned_end_at, pricePerHour: s.price_per_hour }).total;
+    const planned = sessionFee({ startedAt: upd.started_at, endAt: upd.planned_end_at, pricePerHour: s.price_per_hour,
+      holdFee: holdFeeOf(s) }).total;
     await notify(db, { userId: s.owner_id, sessionId: s.id, type: 'extended', key: `s${s.id}:ext:${upd.extend_count}`,
       title: `Đã gia hạn thêm ${minutes} phút`,
       body: `Giờ gửi dự kiến mới: ${hhmm(upd.planned_end_at)}. Phí dự kiến ${vnd(planned)}.`,

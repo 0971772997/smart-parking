@@ -1,9 +1,9 @@
 import { request } from './client';
 
 export const gatesApi = {
-  /** (Admin) Ma QR cua cong de hien tai cong - tu doi sau ttlSeconds, goi lai truoc khi het han */
+  /** (Admin) Ma QR cua bai de hien tai cong (bo trong gate = 1 ma chung cho vao + ra) - tu doi sau ttlSeconds, goi lai truoc khi het han */
   display: (lotId, gate, opts) =>
-    request(`/gates/display?lotId=${encodeURIComponent(lotId)}&gate=${gate}`, opts),
+    request(`/gates/display?lotId=${encodeURIComponent(lotId)}${gate ? `&gate=${gate}` : ''}`, opts),
 
   /** (Tai xe) Quet ma QR cua cong -> mo barie. body: { token, reservationId?, vehicleId? } */
   checkin: (body, opts) => request('/gates/checkin', { method: 'POST', body, timeoutMs: 30000, ...opts }),

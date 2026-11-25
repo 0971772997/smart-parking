@@ -430,7 +430,7 @@ export function RulesBox({ rules }) {
   const items = [
     `Mỗi tài khoản giữ tối đa ${rules.maxActivePerUser} chỗ cùng lúc.`,
     'Đặt chỗ chỉ thành công khi thiết bị tại bãi xác nhận giữ ô (đèn ô chuyển vàng).',
-    `Gia hạn tối đa ${rules.extend.maxTimes} lần, mỗi lần ≤ ${rules.extend.max} phút, khi chỗ còn đang giữ.`,
+    `Gia hạn giữ chỗ tối đa ${rules.extend.maxTimes} lần, mỗi lần ≤ ${rules.extend.max} phút, phí ${formatVND(rules.extend.fee ?? 5000)}/lần (cộng vào phí gửi xe).`,
     'Huỷ miễn phí bất cứ lúc nào trước khi xe vào ô.',
     `Quá giờ giữ chỗ mà xe chưa vào ô → hết hạn, tính 1 lần không đến. ${rules.noShow.limit} lần trong ${rules.noShow.windowDays} ngày → tạm khoá đặt chỗ ${rules.noShow.suspendHours} giờ.`,
     'Đến cổng vào, dùng app quét mã QR tại cổng → barie mở, bắt đầu phiên gửi xe, phí tính từ lúc vào bãi (làm tròn lên theo giờ, tối thiểu 1 giờ).',

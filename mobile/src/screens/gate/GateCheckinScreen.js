@@ -144,7 +144,7 @@ export default function GateCheckinScreen({ navigation, route }) {
               onAgain={scanAgain}
               onRetry={() => submit(lastToken.current)}
               onDone={() => navigation.goBack()}
-              onPay={(sessionId) => navigation.navigate('Payment', { sessionId })}
+              onPay={(sessionId, method) => navigation.navigate('Payment', method ? { sessionId, method, auto: true } : { sessionId })}
               onBook={(lotId) => navigation.navigate('Booking', { lotId })}
               onSession={(id) => navigation.navigate('SessionDetail', { id })}
             />
@@ -244,7 +244,9 @@ function ResultPanel({ result, gate, onAgain, onRetry, onDone, onPay, onBook, on
   return (
     <View style={[styles.result, { backgroundColor: pay ? '#B45309' : colors.danger }]}>
       <Ionicons name={pay ? 'wallet' : 'close-circle'} size={56} color="#fff" />
-      <Text style={styles.resultTitle}>BARIE CHƯA MỞ{gate ? ` • ${gateLabel(gate).toUpperCase()}` : ''}</Text>
+      <Text style={styles.resultTitle}>
+        BARIE CHƯA MỞ{(gate || details.gate) ? ` • ${gateLabel(gate || details.gate).toUpperCase()}` : ''}
+      </Text>
       <Text style={styles.resultBig}>{title}</Text>
       {pay ? <Text style={styles.resultFee}>{formatVND(details.fee)}</Text> : null}
       {details.lot?.name ? <Text style={styles.resultSub}>{details.lot.name}</Text> : null}
@@ -252,9 +254,14 @@ function ResultPanel({ result, gate, onAgain, onRetry, onDone, onPay, onBook, on
       <Text style={styles.resultHelp}>{help}</Text>
       <View style={styles.resultActions}>
         {pay && details.sessionId ? (
-          <Pressable onPress={() => onPay(details.sessionId)} style={styles.resultBtn}>
-            <Text style={styles.resultBtnText}>Thanh toán ngay</Text>
-          </Pressable>
+          <>
+            <Pressable onPress={() => onPay(details.sessionId, 'cash')} style={styles.resultBtn}>
+              <Text style={styles.resultBtnText}>Trả tiền mặt</Text>
+            </Pressable>
+            <Pressable onPress={() => onPay(details.sessionId)} style={styles.resultBtn}>
+              <Text style={styles.resultBtnText}>Chuyển khoản / MoMo</Text>
+            </Pressable>
+          </>
         ) : null}
         {['no_reservation', 'reservation_expired', 'reservation_not_active'].includes(code) && details.lot?.id ? (
           <Pressable onPress={() => onBook(details.lot.id)} style={styles.resultBtn}>

@@ -14,7 +14,8 @@ const RULES = {
   maxActivePerUser: 1,                                         // moi tai khoan chi 1 dat cho dang hieu luc
   hold: { min: 5, max: 120, default: 15, options: [15, 30, 45, 60] },          // phut giu cho cho xe den
   duration: { min: 30, max: 1440, default: 120, options: [60, 120, 180, 240, 480] }, // thoi luong gui du kien (phut)
-  extend: { maxTimes: 2, min: 5, max: 30, options: [10, 15, 30] },             // gia han: toi da 2 lan, moi lan <= 30 phut
+  // gia han giu cho: toi da 2 lan, moi lan <= 30 phut, MOI LAN +5.000d (cong vao phi gui xe, tra khi ra cong)
+  extend: { maxTimes: 2, min: 5, max: 30, options: [10, 15, 30], fee: 5000 },
   graceSeconds: 60,          // qua gio giu cho them 60s (cho do tre MQTT) server moi tu danh dau het han
   pendingTimeoutSeconds: 60, // 'pending' qua 60s (server loi giua chung) -> failed
   noShow: { limit: 3, windowDays: 7, suspendHours: 24 },   // 3 lan khong den trong 7 ngay -> khoa dat cho 24 gio

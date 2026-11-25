@@ -116,3 +116,13 @@ describe('breakdownOf (chi tiet phi tren bien nhan)', () => {
     assert.equal(free.hours, 0);
   });
 });
+
+test('Phi gia han giu cho luon cong vao tong (ke ca vao roi ra mien phi trong an han)', () => {
+
+  const start = Date.parse('2026-11-25T08:00:00Z');
+  const a = sessionFee({ startedAt: start, endAt: start + 90 * 60000, pricePerHour: 10000, holdFee: 5000 });
+  assert.deepEqual([a.base, a.holdFee, a.total], [20000, 5000, 25000]);
+  const b = sessionFee({ startedAt: start, endAt: start + 5 * 60000, pricePerHour: 10000, parked: false, holdFee: 10000 });
+  assert.deepEqual([b.base, b.total], [0, 10000]);
+  assert.equal(sessionFee({ startedAt: start, endAt: start + 60000, pricePerHour: 10000 }).holdFee, 0);
+});

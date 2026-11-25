@@ -7,11 +7,14 @@ const crypto = require('crypto');
 const { conflict } = require('./errors');
 const { closeSession, notify, vnd } = require('./sessions');
 const { outcome, describe } = require('./paymentGateway');
+const { RULES } = require('./booking');
 
 const METHOD_LABEL = {
   cash: 'Tiền mặt', momo: 'Ví MoMo', atm: 'Thẻ ATM nội địa', card: 'Thẻ Visa/Master', zalopay: 'ZaloPay', bank: 'Chuyển khoản',
 };
-const PROVIDER_LABEL = { momo: 'MoMo (môi trường thử nghiệm)', cash: 'Thu tại quầy', mock: 'Giả lập' };
+const PROVIDER_LABEL = {
+  momo: 'MoMo (môi trường thử nghiệm)', cash: 'Thu tại quầy', transfer: 'Chuyển khoản – nhân viên xác nhận', mock: 'Giả lập',
+};
 
 const PAYMENT_SELECT = `
   SELECT p.*, s.slot_number, s.zone, s.lot_id, l.name AS lot_name, l.address AS lot_address,
@@ -36,18 +39,24 @@ function newCode() {
 function breakdownOf(s) {
   const fee = s.fee || 0;
   const overtime = s.overtime_fee || 0;
+  const hold = s.hold_fee || 0;
   const seconds = s.duration_seconds ?? 0;
-  const hours = fee > 0 ? Math.max(1, Math.ceil(seconds / 3600)) : 0;
+  const base = fee - overtime - hold;
+  const hours = base > 0 ? Math.max(1, Math.ceil(seconds / 3600)) : 0;
   const lines = [];
-  if (fee - overtime > 0) lines.push({ label: `Phí gửi xe ${hours} giờ × ${vnd(s.price_per_hour)}`, amount: fee - overtime });
+  if (base > 0) lines.push({ label: `Phí gửi xe ${hours} giờ × ${vnd(s.price_per_hour)}`, amount: base });
   if (overtime > 0) lines.push({ label: 'Phụ phí quá giờ dự kiến', amount: overtime });
+  if (hold > 0) {
+    const n = Math.round(hold / RULES.extend.fee);
+    lines.push({ label: `Phí gia hạn giữ chỗ (${n} lần × ${vnd(RULES.extend.fee)})`, amount: hold });
+  }
   if (fee === 0) lines.push({ label: 'Miễn phí (rời bãi trong thời gian ân hạn)', amount: 0 });
   return {
     lotName: s.lot_name, lotAddress: s.lot_address, zone: s.zone, slotNumber: s.slot_number,
     vehiclePlate: s.vehicle_plate ?? null, reservationCode: s.reservation_code ?? null,
     startedAt: s.started_at, parkedAt: s.parked_at, endedAt: s.ended_at, durationSeconds: seconds,
     plannedEndAt: s.planned_end_at, pricePerHour: s.price_per_hour, hours,
-    base: fee - overtime, overtime, total: fee, lines,
+    base, overtime, holdFee: hold, total: fee, lines,
   };
 }
 

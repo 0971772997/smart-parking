@@ -21,6 +21,7 @@ const SESSION_SELECT = `
   SELECT ps.*, s.slot_number, s.zone, s.lot_id, l.name AS lot_name, l.address AS lot_address,
          COALESCE(ps.hourly_rate, l.price_per_hour) AS price_per_hour, l.price_per_hour AS lot_price_per_hour, l.online,
          r.code AS reservation_code, r.duration_minutes, COALESCE(ps.user_id, r.user_id) AS owner_id,
+         COALESCE(r.extend_count, 0) AS hold_extensions,
          veh.plate_number AS vehicle_plate,
          p.id AS payment_id, p.code AS payment_code, p.method AS payment_method, p.amount AS payment_amount,
          p.created_at AS paid_at
@@ -39,14 +40,16 @@ const ACTIVE_WHERE = `ps.exited_at IS NULL AND (ps.ended_at IS NULL
 const ms = (d) => (d ? new Date(d).getTime() : null);
 
 // Phi tai thoi diem endAt -> { hours, base, overtimeHours, overtime, total, nextChangeAt }
-function sessionFee({ startedAt, endAt = Date.now(), pricePerHour, plannedEndAt = null, parked = true }) {
+// holdFee: phi gia han giu cho (so lan gia han dat cho x RULES.extend.fee) - luon cong vao tong
+function sessionFee({ startedAt, endAt = Date.now(), pricePerHour, plannedEndAt = null, parked = true, holdFee = 0 }) {
   const cfg = RULES.session;
   const start = ms(startedAt);
   const end = ms(endAt);
   const price = pricePerHour || 0;
   const elapsed = Math.max(0, end - start);
   if (!parked && elapsed <= cfg.noParkGraceMinutes * MIN) {
-    return { hours: 0, base: 0, overtimeHours: 0, overtime: 0, total: 0, nextChangeAt: new Date(start + cfg.noParkGraceMinutes * MIN) };
+    return { hours: 0, base: 0, overtimeHours: 0, overtime: 0, holdFee, total: holdFee,
+      nextChangeAt: new Date(start + cfg.noParkGraceMinutes * MIN) };
   }
   const hours = Math.max(1, Math.ceil(elapsed / HOUR));
   const base = hours * price;
@@ -62,8 +65,11 @@ function sessionFee({ startedAt, endAt = Date.now(), pricePerHour, plannedEndAt 
     }
   }
   const overtime = Math.round(overtimeHours * price * cfg.overtimeRate);
-  return { hours, base, overtimeHours, overtime, total: base + overtime, nextChangeAt: new Date(next) };
+  return { hours, base, overtimeHours, overtime, holdFee, total: base + overtime + holdFee, nextChangeAt: new Date(next) };
 }
+
+// Phi gia han giu cho cua phien: dong da chot (hold_fee) hoac tinh tu so lan gia han dat cho (hold_extensions)
+const holdFeeOf = (s) => (s.ended_at ? s.hold_fee || 0 : (Number(s.hold_extensions) || 0) * RULES.extend.fee);
 
 const phaseOf = (s) => {
   if (s.exited_at || (s.source !== 'gate' && s.ended_at)) return 'completed';
@@ -75,15 +81,17 @@ const phaseOf = (s) => {
 // Chot phi cho phien (xe roi o / ra cong khi chua do). q: db hoac client trong transaction
 async function closeSession(q, sessionId, endAt = Date.now()) {
   const s = (await q.query(
-    `SELECT ps.*, COALESCE(ps.hourly_rate, l.price_per_hour) AS price_per_hour FROM parking_sessions ps JOIN slots sl ON sl.id = ps.slot_id
-     JOIN parking_lots l ON l.id = sl.lot_id WHERE ps.id = $1 AND ps.ended_at IS NULL FOR UPDATE OF ps`, [sessionId])).rows[0];
+    `SELECT ps.*, COALESCE(ps.hourly_rate, l.price_per_hour) AS price_per_hour, COALESCE(r.extend_count, 0) AS hold_extensions
+     FROM parking_sessions ps JOIN slots sl ON sl.id = ps.slot_id
+     JOIN parking_lots l ON l.id = sl.lot_id LEFT JOIN reservations r ON r.id = ps.reservation_id
+     WHERE ps.id = $1 AND ps.ended_at IS NULL FOR UPDATE OF ps`, [sessionId])).rows[0];
   if (!s) return null;
   const fee = sessionFee({ startedAt: s.started_at, endAt, pricePerHour: s.price_per_hour,
-    plannedEndAt: s.planned_end_at, parked: !!s.parked_at });
+    plannedEndAt: s.planned_end_at, parked: !!s.parked_at, holdFee: holdFeeOf(s) });
   return (await q.query(
     `UPDATE parking_sessions SET ended_at = to_timestamp($2 / 1000.0), duration_seconds = $3, fee = $4, overtime_fee = $5,
-       updated_at = now() WHERE id = $1 RETURNING *`,
-    [sessionId, endAt, Math.round((endAt - ms(s.started_at)) / 1000), fee.total, fee.overtime])).rows[0];
+       hold_fee = $6, updated_at = now() WHERE id = $1 RETURNING *`,
+    [sessionId, endAt, Math.round((endAt - ms(s.started_at)) / 1000), fee.total, fee.overtime, fee.holdFee])).rows[0];
 }
 
 // Them thong bao (bo qua neu trung dedupe_key). q: db hoac client trong transaction
@@ -170,11 +178,13 @@ function sessionView(s, now = Date.now()) {
   if (!s) return s;
   const phase = phaseOf(s);
   const open = !s.ended_at;
+  const holdFee = holdFeeOf(s);
   const fee = open
-    ? sessionFee({ startedAt: s.started_at, endAt: now, pricePerHour: s.price_per_hour, plannedEndAt: s.planned_end_at, parked: !!s.parked_at })
+    ? sessionFee({ startedAt: s.started_at, endAt: now, pricePerHour: s.price_per_hour, plannedEndAt: s.planned_end_at,
+      parked: !!s.parked_at, holdFee })
     : null;
   const plannedFee = s.planned_end_at
-    ? sessionFee({ startedAt: s.started_at, endAt: ms(s.planned_end_at), pricePerHour: s.price_per_hour }).total
+    ? sessionFee({ startedAt: s.started_at, endAt: ms(s.planned_end_at), pricePerHour: s.price_per_hour, holdFee }).total
     : null;
   const total = open ? fee.total : s.fee || 0;
   const paid = !!s.payment_id;
@@ -197,8 +207,9 @@ function sessionView(s, now = Date.now()) {
     status: open ? 'parking' : paid ? 'paid' : 'unpaid',
     cost: {
       total, final: !open,
-      hours: open ? fee.hours : null, base: open ? fee.base : (s.fee || 0) - (s.overtime_fee || 0),
+      hours: open ? fee.hours : null, base: open ? fee.base : (s.fee || 0) - (s.overtime_fee || 0) - holdFee,
       overtime: open ? fee.overtime : s.overtime_fee || 0, overtimeHours: open ? fee.overtimeHours : null,
+      holdFee, holdExtensions: holdFee / RULES.extend.fee,
       nextChangeAt: open ? fee.nextChangeAt : null,
       planned: plannedFee,
     },
@@ -214,6 +225,6 @@ function sessionView(s, now = Date.now()) {
 }
 
 module.exports = {
-  SESSION_SELECT, ACTIVE_WHERE, sessionFee, closeSession, notify, startGateSession, refreshAlerts, sessionView, phaseOf,
-  vnd, hhmm,
+  SESSION_SELECT, ACTIVE_WHERE, sessionFee, holdFeeOf, closeSession, notify, startGateSession, refreshAlerts, sessionView,
+  phaseOf, vnd, hhmm,
 };

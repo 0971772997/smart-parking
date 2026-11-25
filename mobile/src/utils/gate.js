@@ -1,11 +1,11 @@
 // Ma QR cua CONG (admin hien tai cong, tai xe quet): nhan dien nhanh tren app truoc khi gui may chu
-//   SPG1.<id bai base64url>.<E|X>.<het han>.<nonce>.<chu ky>  (may chu moi la noi xac thuc chu ky)
+//   SPG1.<id bai base64url>.<G|E|X>.<het han>   (G = 1 ma chung cho vao + ra, may chu tu chon cong).<nonce>.<chu ky>  (may chu moi la noi xac thuc chu ky)
 
-// -> { kind: 'gate', gate: 'entry'|'exit' } | { kind: 'reservation' } | { kind: 'other' }
+// -> { kind: 'gate', gate: 'entry'|'exit'|null (ma chung) } | { kind: 'reservation' } | { kind: 'other' }
 export function classifyQr(raw) {
   const parts = String(raw || '').trim().split('.');
-  if (parts.length === 6 && parts[0] === 'SPG1' && (parts[2] === 'E' || parts[2] === 'X')) {
-    return { kind: 'gate', gate: parts[2] === 'E' ? 'entry' : 'exit' };
+  if (parts.length === 6 && parts[0] === 'SPG1' && ['G', 'E', 'X'].includes(parts[2])) {
+    return { kind: 'gate', gate: { G: null, E: 'entry', X: 'exit' }[parts[2]] };
   }
   if (parts.length === 6 && parts[0] === 'SP1') return { kind: 'reservation' };
   return { kind: 'other' };
@@ -21,12 +21,12 @@ const DRIVER_ERRORS = {
   no_reservation: ['Bạn chưa đặt chỗ ở bãi này', 'Đặt chỗ ngay trên app rồi quét lại mã tại cổng.'],
   already_entered: ['Xe đã vào bãi', 'Lượt đặt chỗ này đã qua cổng vào. Khi ra hãy quét mã ở cổng RA.'],
   already_exited: ['Xe đã ra bãi', 'Lượt gửi xe đã kết thúc.'],
-  not_entered: ['Xe chưa vào bãi', 'Bạn đang quét mã cổng RA. Hãy quét mã ở cổng VÀO trước.'],
+  not_entered: ['Xe chưa vào bãi', 'Hãy quét mã ở cổng VÀO trước.'],
   pass_expired: ['Quá hạn ra bãi', 'Liên hệ nhân viên tại cổng để được hỗ trợ.'],
   reservation_expired: ['Đặt chỗ đã hết giờ giữ', 'Hãy đặt chỗ mới rồi quét lại.'],
   reservation_not_active: ['Đặt chỗ không còn hiệu lực', 'Đặt chỗ đã huỷ hoặc hết hạn. Hãy đặt chỗ mới.'],
   still_parked: ['Xe vẫn đang trong ô', 'Hãy lái xe ra khỏi ô đỗ, chờ vài giây rồi quét lại.'],
-  payment_required: ['Chưa thanh toán phí', 'Thanh toán trên app để barie tự mở, hoặc trả tiền mặt cho nhân viên.'],
+  payment_required: ['Chưa thanh toán phí', 'Chọn trả tiền mặt cho nhân viên hoặc chuyển khoản / MoMo. Nhân viên xác nhận xong barie tự mở.'],
   device_offline: ['Barie đang mất kết nối', 'Liên hệ nhân viên tại cổng để mở barie thủ công.'],
   device_timeout: ['Barie chưa phản hồi', 'Bấm "Thử lại". Nếu vẫn lỗi hãy liên hệ nhân viên.'],
   scan_in_progress: ['Đang xử lý', 'Một lần quét khác đang được xử lý, chờ vài giây.'],

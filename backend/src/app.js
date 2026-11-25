@@ -14,7 +14,7 @@ const isDbDown = (e) => DB_DOWN_CODES.has(e.code) || /Connection terminated|conn
 
 function createApp({ db, auth, device, otpDevMode = true, social, gatePass = createGatePass('dev-qr-secret'),
   live = createLiveHub(), gateway = createMomoGateway(), publicUrl = 'http://localhost:3000', receiptSecret = 'dev-receipt-secret',
-  allowMockPayments = true, push = null, loginLimits }) {
+  allowMockPayments = true, push = null, loginLimits, payee = require('./config').payments.payee }) {
   // Thong bao moi -> day toi dien thoai (push = createPushService; bo trong khi khong can, vd mot so test)
   setPushHook(push ? (row) => push.sendNotification(row) : null);
   const app = express();
@@ -52,7 +52,7 @@ function createApp({ db, auth, device, otpDevMode = true, social, gatePass = cre
   app.use('/api', require('./routes/push')({ db, auth, push }));
   app.use('/api/admin', require('./routes/admin')({ db, auth, device, publicUrl, receiptSecret }));
   app.use('/api', require('./routes/payments')({
-    db, auth, gateway, publicUrl, receiptSecret, allowMock: allowMockPayments, live,
+    db, auth, device, gateway, publicUrl, receiptSecret, allowMock: allowMockPayments, live, payee,
   }));
 
   app.use((_req, _res, next) => next(new HttpError(404, 'not_found', 'Khong tim thay API')));

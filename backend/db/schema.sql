@@ -400,3 +400,6 @@ DO $$ BEGIN
   ALTER TABLE vehicles ADD CONSTRAINT chk_vehicle_type
     CHECK (vehicle_type IN ('car', 'motorbike', 'electric', 'bicycle', 'other'));
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- v16: Phi gia han giu cho (moi lan gia han dat cho +RULES.extend.fee), cong vao phi gui xe khi chot phi
+ALTER TABLE parking_sessions ADD COLUMN IF NOT EXISTS hold_fee INT NOT NULL DEFAULT 0;

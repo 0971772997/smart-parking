@@ -1,8 +1,9 @@
 // QUA CONG BANG MA QR
-// Luong chinh - TAI XE QUET MA CUA CONG (admin hien ma tren man hinh dat tai cong):
-//   GET  /api/gates/display?lotId=&gate=   (admin)  ma QR cua cong, tu doi moi RULES.gate.gateQrTtlSeconds
-//   POST /api/gates/checkin { token, reservationId?, vehicleId? }  (tai xe) -> tim dat cho cua tai xe o bai
-//        -> kiem tra -> mo barie -> xac nhan. Khong co dat cho -> no_reservation (app goi y dat cho ngay)
+// Luong chinh - TAI XE QUET MA CUA BAI (admin hien 1 ma chung tren man hinh dat tai cong):
+//   GET  /api/gates/display?lotId=[&gate=]  (admin)  ma QR cua bai (mac dinh dung chung cho VAO va RA),
+//                                                    tu doi moi RULES.gate.gateQrTtlSeconds
+//   POST /api/gates/checkin { token, reservationId?, vehicleId? }  (tai xe) -> tim dat cho cua tai xe o bai,
+//        tu chon cong: chua vao -> VAO, da vao -> RA -> kiem tra -> mo barie. Khong co dat cho -> no_reservation
 // Du phong - nhan vien quet ma tren dien thoai tai xe:
 //   POST /api/gates/scan   { lotId, gate: 'entry'|'exit', token }  -> xac thuc -> mo barie -> xac nhan
 //   GET  /api/gates/scans?lotId=&gate=&limit=                       nhat ky quet (ca lan loi)
@@ -13,35 +14,13 @@
 //   -> cong ra: still_parked (xe chua roi o) / payment_required (chua tra phi)
 //   -> device_offline -> scan_in_progress (quet trung cung luc) -> device_timeout / loi tu ESP32
 // Thanh cong = ESP32 tra ack ok cho lenh open_gate -> ghi entered_at / exited_at.
-const crypto = require('crypto');
 const express = require('express');
-const { wrap, badRequest, notFound, HttpError } = require('../errors');
+const { wrap, badRequest, notFound } = require('../errors');
 const v = require('../validate');
 const map = require('../mappers');
 const { RULES, RESERVATION_SELECT, expireStale } = require('../booking');
-const { nextGate, gateBlock, exitBlock, confirmScan } = require('../gatePass');
-
-const ERRORS = {
-  qr_invalid: [400, 'Ma QR khong hop le (khong phai ma cua he thong hoac bi sua)'],
-  qr_expired: [410, 'Ma QR da het han, hay quet ma moi'],
-  reservation_not_found: [404, 'Khong tim thay luot dat cho cua ma nay'],
-  wrong_lot: [409, 'Ma QR thuoc bai do khac'],
-  wrong_gate: [409, 'Ma QR khong dung cong (ma vao dung o cong vao, ma ra dung o cong ra)'],
-  already_entered: [409, 'Xe da qua cong vao'],
-  already_exited: [409, 'Xe da ra bai'],
-  not_entered: [409, 'Xe chua qua cong vao'],
-  pass_expired: [409, 'Luot gui xe da qua thoi han ra bai'],
-  reservation_expired: [409, 'Dat cho da het gio giu cho'],
-  reservation_not_active: [409, 'Dat cho khong con hieu luc'],
-  still_parked: [409, 'Xe van dang o trong o do (cam bien chua ghi nhan xe roi o)'],
-  payment_required: [402, 'Chua thanh toan phi gui xe'],
-  device_offline: [503, 'Thiet bi bai do dang mat ket noi'],
-  scan_in_progress: [409, 'Dang xu ly mot lan quet khac'],
-  device_timeout: [504, 'Thiet bi khong phan hoi, barie chua mo'],
-  lot_not_found: [404, 'Bai do cua ma QR nay khong con ton tai'],
-  no_reservation: [404, 'Ban chua co dat cho con hieu luc o bai nay'],
-  vehicle_not_found: [400, 'Xe khong thuoc tai khoan nay'],
-};
+const { nextGate, gateBlock } = require('../gatePass');
+const { createGateOps } = require('../gateOps');
 
 // Dat cho cua tai xe o 1 bai con co the qua cong (chua ra bai), moi nhat truoc
 const DRIVER_CANDIDATES = `${RESERVATION_SELECT}
@@ -53,93 +32,21 @@ module.exports = function gateRoutes({ db, auth, device, gatePass }) {
   const r = express.Router();
   r.use(auth.requireAuth);
   const admin = auth.requireAdmin;
+  const { makeDeny, passGate } = createGateOps({ db, device });
 
-  // Tu choi: ghi nhat ky (khi da biet bai do) roi nem loi kem thong tin de xu ly tai cho
-  function makeDeny({ lotId, gate, nonce, userId, mode, getResv }) {
-    return async (code, extra = {}) => {
-      const resv = getResv();
-      let scanId = null;
-      if (lotId) {
-        const scan = await db.one(
-          `INSERT INTO gate_scans (lot_id, gate, reservation_id, nonce, result, error, scanned_by, mode)
-           VALUES ($1, $2, $3, $4, 'denied', $5, $6, $7) RETURNING id`,
-          [lotId, gate, resv?.id ?? null, nonce ?? null, code, userId, mode]);
-        scanId = scan.id;
-      }
-      const [status, msg] = ERRORS[code] || [409, 'Thiet bi tu choi'];
-      throw Object.assign(new HttpError(status, code, msg), {
-        details: { scanId, gate, reservation: resv ? map.reservation(resv) : null, ...extra },
-      });
-    };
-  }
-
-  // Kiem tra trang thai dat cho + phi, roi mo barie (dung chung cho tai xe quet ma cong / nhan vien quet ma tai xe)
-  async function passGate({ lot, gate, resv, nonce, userId, mode, deny }) {
-    const block = gateBlock(resv, gate);
-    if (block) await deny(block);
-    if (gate === 'exit') {
-      const fee = await exitBlock(db, resv.id);
-      if (fee) await deny(fee.error, { sessionId: fee.sessionId, fee: fee.fee });
+  const readGate = (src, optional = false) => {
+    const gate = v.str(src, 'gate', { max: 5, optional });
+    if (gate === null) return null;
+    if (!['entry', 'exit', 'any'].includes(gate) || (!optional && gate === 'any')) {
+      throw badRequest('invalid_gate', "gate phai la 'entry' hoac 'exit'");
     }
-    if (!lot.online) await deny('device_offline');
-
-    // Giu cho lan quet nay (unique theo dat cho + cong) truoc khi ra lenh -> 2 lan quet cung luc chi 1 lan mo
-    const requestId = crypto.randomUUID();
-    let scan;
-    try {
-      scan = await db.one(
-        `INSERT INTO gate_scans (lot_id, gate, reservation_id, nonce, result, error, request_id, scanned_by, mode)
-         VALUES ($1, $2, $3, $4, 'pending', NULL, $5, $6, $7) RETURNING *`,
-        [lot.id, gate, resv.id, nonce ?? null, requestId, userId, mode]);
-    } catch (e) {
-      if (e.code === '23505') await deny('scan_in_progress');
-      throw e;
-    }
-
-    const ack = await device.sendCommand(lot.id, {
-      action: 'open_gate', gate, requestId, slot: resv.slot_number, code: resv.code,
-    });
-    if (!ack || !ack.ok) {
-      const code = ack ? ack.error || 'device_error' : 'device_timeout';
-      await db.query(`UPDATE gate_scans SET result = 'denied', error = $2 WHERE id = $1 AND result = 'pending'`,
-        [scan.id, code]);
-      const [status, msg] = ERRORS[code] || [409, 'Thiet bi tu choi mo barie'];
-      throw Object.assign(new HttpError(status, code, msg),
-        { details: { scanId: scan.id, gate, reservation: map.reservation(resv) } });
-    }
-
-    const confirmed = (await confirmScan(db, requestId)) || scan;
-    if (gate === 'exit' && resv.status === 'active') {
-      // Ra bai khi chua do: bao thiet bi bo giu o (khong chan neu loi - DB da tra o)
-      await device.sendCommand(lot.id, { action: 'cancel_reservation', slot: resv.slot_number });
-    }
-    const fresh = await db.one(`${RESERVATION_SELECT} WHERE r.id = $1`, [resv.id]);
-    return {
-      ok: true,
-      gate,
-      lotId: lot.id,
-      lotName: lot.name,
-      scanId: scan.id,
-      confirmedAt: confirmed.confirmed_at,
-      sessionId: confirmed.session?.id ?? fresh.session_id ?? null,
-      fee: gate === 'exit' ? confirmed.session?.fee ?? null : null,
-      message: gate === 'entry'
-        ? `Moi xe vao. Den khu ${resv.zone || '-'}, o so ${resv.slot_number}`
-        : 'Hen gap lai!',
-      reservation: map.reservation(fresh),
-    };
-  }
-
-  const readGate = (src) => {
-    const gate = v.str(src, 'gate', { max: 5 });
-    if (!['entry', 'exit'].includes(gate)) throw badRequest('invalid_gate', "gate phai la 'entry' hoac 'exit'");
     return gate;
   };
 
-  // ===== Ma QR cua cong: admin mo tren may tinh bang / man hinh dat tai cong =====
+  // ===== Ma QR cua bai: admin mo tren may tinh bang / man hinh dat tai cong =====
   r.get('/display', admin, wrap(async (req, res) => {
     const lotId = v.str(req.query, 'lotId', { max: 50 });
-    const gate = readGate(req.query);
+    const gate = readGate(req.query, true) || 'any';
     const lot = await db.one('SELECT id, name, online FROM parking_lots WHERE id = $1', [lotId]);
     if (!lot) throw notFound('lot_not_found', 'Khong tim thay bai do');
     const p = gatePass.issueGate(lot.id, gate);
@@ -149,35 +56,37 @@ module.exports = function gateRoutes({ db, auth, device, gatePass }) {
     });
   }));
 
-  // ===== Tai xe quet ma QR cua cong =====
+  // ===== Tai xe quet ma QR cua bai =====
   r.post('/checkin', wrap(async (req, res) => {
     const token = v.str(req.body, 'token', { max: 300 });
     const reservationId = v.int(req.body, 'reservationId', { min: 1, optional: true });
     const vehicleId = v.int(req.body, 'vehicleId', { min: 1, optional: true });
     const pass = gatePass.verifyGate(token);
     let resv = null;
-    const base = { gate: pass.gate || 'entry', nonce: pass.nonce, userId: req.user.id, mode: 'driver', getResv: () => resv };
+    let gate = pass.gate || null; // null = ma chung -> chon theo dat cho
+    const base = { gate: () => gate, nonce: pass.nonce, userId: req.user.id, mode: 'driver', getResv: () => resv };
 
     if (!pass.ok && pass.error === 'qr_invalid') await makeDeny({ ...base, lotId: null })('qr_invalid');
     const lot = await db.one('SELECT * FROM parking_lots WHERE id = $1', [pass.lotId]);
     if (!lot) await makeDeny({ ...base, lotId: null })('lot_not_found');
     const deny = makeDeny({ ...base, lotId: lot.id });
-    const { gate } = pass;
     const lotInfo = { lot: { id: lot.id, name: lot.name } };
     if (!pass.ok) await deny(pass.error, { expiredAt: pass.expiresAt, ...lotInfo });
 
     await expireStale(db);
     const { rows } = await db.query(DRIVER_CANDIDATES, [req.user.id, lot.id, RULES.gate.exitWithinHours]);
     const list = reservationId ? rows.filter((x) => x.id === reservationId) : rows;
-    resv = list.find((x) => nextGate(x) === gate) || null;
+    resv = list.find((x) => (gate ? nextGate(x) === gate : nextGate(x) !== null)) || null;
     if (!resv) {
-      // Khong co dat cho dung duoc o cong nay: neu co dat cho gan nhat -> bao ly do cu the (vd da vao roi)
+      // Khong co dat cho dung duoc: neu co dat cho gan nhat -> bao ly do cu the (vd da vao roi)
       if (list[0]) {
         resv = list[0];
+        gate = gate || (resv.entered_at || resv.status === 'fulfilled' ? 'exit' : 'entry');
         await deny(gateBlock(resv, gate) || 'reservation_not_active', lotInfo);
       }
       await deny('no_reservation', lotInfo);
     }
+    gate = gate || nextGate(resv);
 
     // Tai xe chon xe luc quet ma ma dat cho chua gan xe -> gan vao dat cho (va phien neu da co)
     if (vehicleId && !resv.vehicle_id) {
