@@ -21,7 +21,7 @@ const SESSION_SELECT = `
   SELECT ps.*, s.slot_number, s.zone, s.lot_id, l.name AS lot_name, l.address AS lot_address,
          COALESCE(ps.hourly_rate, l.price_per_hour) AS price_per_hour, l.price_per_hour AS lot_price_per_hour, l.online,
          r.code AS reservation_code, r.duration_minutes, COALESCE(ps.user_id, r.user_id) AS owner_id,
-         COALESCE(r.extend_count, 0) AS hold_extensions,
+         COALESCE(r.hold_fee, 0) AS resv_hold_fee, COALESCE(r.extend_count, 0) AS hold_extensions,
          veh.plate_number AS vehicle_plate,
          p.id AS payment_id, p.code AS payment_code, p.method AS payment_method, p.amount AS payment_amount,
          p.created_at AS paid_at
@@ -68,8 +68,8 @@ function sessionFee({ startedAt, endAt = Date.now(), pricePerHour, plannedEndAt 
   return { hours, base, overtimeHours, overtime, holdFee, total: base + overtime + holdFee, nextChangeAt: new Date(next) };
 }
 
-// Phi gia han giu cho cua phien: dong da chot (hold_fee) hoac tinh tu so lan gia han dat cho (hold_extensions)
-const holdFeeOf = (s) => (s.ended_at ? s.hold_fee || 0 : (Number(s.hold_extensions) || 0) * RULES.extend.fee);
+// Phi giu cho cua phien: da chot (parking_sessions.hold_fee) hoac dang tinh tu dat cho (reservations.hold_fee)
+const holdFeeOf = (s) => (s.ended_at ? s.hold_fee || 0 : Number(s.resv_hold_fee) || 0);
 
 const phaseOf = (s) => {
   if (s.exited_at || (s.source !== 'gate' && s.ended_at)) return 'completed';
@@ -81,7 +81,7 @@ const phaseOf = (s) => {
 // Chot phi cho phien (xe roi o / ra cong khi chua do). q: db hoac client trong transaction
 async function closeSession(q, sessionId, endAt = Date.now()) {
   const s = (await q.query(
-    `SELECT ps.*, COALESCE(ps.hourly_rate, l.price_per_hour) AS price_per_hour, COALESCE(r.extend_count, 0) AS hold_extensions
+    `SELECT ps.*, COALESCE(ps.hourly_rate, l.price_per_hour) AS price_per_hour, COALESCE(r.hold_fee, 0) AS resv_hold_fee, COALESCE(r.extend_count, 0) AS hold_extensions
      FROM parking_sessions ps JOIN slots sl ON sl.id = ps.slot_id
      JOIN parking_lots l ON l.id = sl.lot_id LEFT JOIN reservations r ON r.id = ps.reservation_id
      WHERE ps.id = $1 AND ps.ended_at IS NULL FOR UPDATE OF ps`, [sessionId])).rows[0];
@@ -209,7 +209,7 @@ function sessionView(s, now = Date.now()) {
       total, final: !open,
       hours: open ? fee.hours : null, base: open ? fee.base : (s.fee || 0) - (s.overtime_fee || 0) - holdFee,
       overtime: open ? fee.overtime : s.overtime_fee || 0, overtimeHours: open ? fee.overtimeHours : null,
-      holdFee, holdExtensions: holdFee / RULES.extend.fee,
+      holdFee, holdExtensions: Number(s.hold_extensions) || 0,
       nextChangeAt: open ? fee.nextChangeAt : null,
       planned: plannedFee,
     },

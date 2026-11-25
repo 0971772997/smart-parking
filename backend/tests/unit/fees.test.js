@@ -126,3 +126,8 @@ test('Phi gia han giu cho luon cong vao tong (ke ca vao roi ra mien phi trong an
   assert.deepEqual([b.base, b.total], [0, 10000]);
   assert.equal(sessionFee({ startedAt: start, endAt: start + 60000, pricePerHour: 10000 }).holdFee, 0);
 });
+
+test('Phi giu cho luc dat: 15 phut dau mien phi, moi nac 15 phut (lam tron len) +5.000d', () => {
+  const { holdFee } = require('../../src/booking');
+  assert.deepEqual([5, 15, 16, 30, 45, 60, 120].map(holdFee), [0, 0, 5000, 5000, 10000, 15000, 35000]);
+});

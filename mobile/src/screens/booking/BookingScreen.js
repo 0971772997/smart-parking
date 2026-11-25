@@ -17,7 +17,7 @@ import { vehiclesApi } from '../../api/vehicles';
 import { vehicleType } from '../../utils/vehicles';
 import { colors, radius } from '../../theme';
 import { formatDuration, formatVND } from '../../utils/schedules';
-import { DEFAULT_RULES, estimateFee, formatClock, formatDateTime, isOpen } from '../../utils/booking';
+import { DEFAULT_RULES, estimateFee, formatClock, formatDateTime, holdFee, isOpen } from '../../utils/booking';
 
 const POLL_MS = 10000;
 const SLOT_COLORS = {
@@ -133,7 +133,9 @@ export default function BookingScreen({ navigation, route }) {
   const autoSlot = zoneSlots.find((s) => s.state === 'free') || null;
   const targetSlot = slotNumber ?? autoSlot?.slotNumber ?? null;
   const price = detail?.pricePerHour ?? lot?.pricePerHour;
-  const fee = estimateFee(price, duration);
+  const holdCost = holdFee(hold, rules.hold);
+  const parkFee = estimateFee(price, duration);
+  const fee = parkFee == null ? null : parkFee + holdCost;
   const holdUntil = new Date(Date.now() + hold * 60000);
   const suspendedUntil = rules.me?.suspendedUntil;
   const vehicle = vehicles.find((v) => v.id === vehicleId);
@@ -305,10 +307,11 @@ export default function BookingScreen({ navigation, route }) {
 
         {/* 4. GIU CHO */}
         <Section index={4} title="Thời gian giữ chỗ"
-          hint={`Ô được giữ đến khoảng ${formatClock(holdUntil)}. Quá giờ mà xe chưa vào ô, chỗ tự huỷ và tính 1 lần không đến.`}>
+          hint={`Ô được giữ đến khoảng ${formatClock(holdUntil)}. ${rules.hold.freeMinutes ?? 15} phút đầu miễn phí, mỗi ${rules.hold.stepMinutes ?? 15} phút thêm ${formatVND(rules.hold.stepFee ?? 5000)}. Quá giờ mà xe chưa vào ô, chỗ tự huỷ và tính 1 lần không đến.`}>
           <View style={styles.chipWrap}>
             {rules.hold.options.map((m) => (
-              <Chip key={m} label={`${m} phút`} on={hold === m} onPress={() => setHold(m)} />
+              <Chip key={m} label={`${m} phút${holdFee(m, rules.hold) ? ` • +${formatVND(holdFee(m, rules.hold))}` : ' • miễn phí'}`}
+                on={hold === m} onPress={() => setHold(m)} />
             ))}
           </View>
         </Section>
@@ -332,8 +335,12 @@ export default function BookingScreen({ navigation, route }) {
           <Row label="Giữ chỗ" value={`${hold} phút (đến ~${formatClock(holdUntil)})`} />
           <Row label="Gửi dự kiến" value={formatDuration(duration)} />
           <View style={styles.divider} />
+          {holdCost ? <Row label="Phí giữ chỗ thêm" value={formatVND(holdCost)} /> : null}
           <Row label="Phí dự kiến" value={formatVND(fee)} strong />
-          <Text style={styles.summaryNote}>Giữ chỗ miễn phí. Phí thực tế tính theo thời gian đỗ thật.</Text>
+          <Text style={styles.summaryNote}>
+            {holdCost ? `Gồm phí giữ chỗ ${formatVND(holdCost)} (cộng vào phí gửi xe, trả khi ra cổng). ` : 'Giữ chỗ 15 phút miễn phí. '}
+            Phí gửi thực tế tính theo thời gian đỗ thật.
+          </Text>
         </View>
 
         <RulesBox rules={rules} />
@@ -431,6 +438,7 @@ export function RulesBox({ rules }) {
     `Mỗi tài khoản giữ tối đa ${rules.maxActivePerUser} chỗ cùng lúc.`,
     'Đặt chỗ chỉ thành công khi thiết bị tại bãi xác nhận giữ ô (đèn ô chuyển vàng).',
     `Gia hạn giữ chỗ tối đa ${rules.extend.maxTimes} lần, mỗi lần ≤ ${rules.extend.max} phút, phí ${formatVND(rules.extend.fee ?? 5000)}/lần (cộng vào phí gửi xe).`,
+    `Giữ chỗ ${rules.hold.freeMinutes ?? 15} phút đầu miễn phí, mỗi ${rules.hold.stepMinutes ?? 15} phút thêm ${formatVND(rules.hold.stepFee ?? 5000)} (cộng vào phí gửi xe).`,
     'Huỷ miễn phí bất cứ lúc nào trước khi xe vào ô.',
     `Quá giờ giữ chỗ mà xe chưa vào ô → hết hạn, tính 1 lần không đến. ${rules.noShow.limit} lần trong ${rules.noShow.windowDays} ngày → tạm khoá đặt chỗ ${rules.noShow.suspendHours} giờ.`,
     'Đến cổng vào, dùng app quét mã QR tại cổng → barie mở, bắt đầu phiên gửi xe, phí tính từ lúc vào bãi (làm tròn lên theo giờ, tối thiểu 1 giờ).',

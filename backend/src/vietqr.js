@@ -32,4 +32,29 @@ function buildVietQR({ bin, accountNo, amount, content }) {
   return s + crc16(s);
 }
 
-module.exports = { buildVietQR, crc16, cleanContent };
+// DEEPLINK MO APP NGAN HANG (dich vu VietQR - dl.vietqr.io): dien san STK @ ma ngan hang, so tien, noi dung.
+//   Danh sach app + co autofill lay tu https://api.vietqr.io/v2/{android,ios}-app-deeplinks (11/2026).
+//   autofill = false: app chi mo duoc, tai xe tu nhap (hoac quet ma VietQR). Gioi han 5 lan/phut/IP voi link tu dien.
+const BANK_APPS = [
+  { appId: 'mb', name: 'MB Bank', autofill: true },
+  { appId: 'bidv', name: 'BIDV SmartBanking', autofill: true },
+  { appId: 'icb', name: 'VietinBank iPay', autofill: true },
+  { appId: 'acb', name: 'ACB ONE', autofill: true },
+  { appId: 'ocb', name: 'OCB OMNI', autofill: true },
+  { appId: 'vcb', name: 'Vietcombank', autofill: false },
+  { appId: 'tcb', name: 'Techcombank', autofill: false },
+  { appId: 'tpb', name: 'TPBank', autofill: false },
+];
+
+function bankDeeplinks({ payee, amount, content, returnUrl }) {
+  const q = (o) => Object.entries(o).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+  return BANK_APPS.map((a) => ({
+    ...a,
+    url: `https://dl.vietqr.io/pay?${q(a.autofill
+      ? { app: a.appId, ba: `${payee.accountNo}@${payee.bankCode || 'mb'}`, am: Math.round(amount), tn: cleanContent(content),
+        bn: payee.accountName, url: returnUrl }
+      : { app: a.appId })}`,
+  }));
+}
+
+module.exports = { buildVietQR, crc16, cleanContent, bankDeeplinks, BANK_APPS };

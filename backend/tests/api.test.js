@@ -574,7 +574,7 @@ describe('Dat cho: khu vuc, thoi luong, quy tac giu cho / het han / xac nhan', (
     assert.match(r.body.code, /^DC-[A-Z2-9]{6}$/);
     assert.equal(r.body.holdMinutes, 30);
     assert.equal(r.body.durationMinutes, 150);
-    assert.equal(r.body.estimatedFee, 30000); // 150 phut -> 3 gio x 10.000
+    assert.equal(r.body.estimatedFee, 35000); // 150 phut -> 3 gio x 10.000 + giu cho 30 phut (1 nac) 5.000
     assert.ok(r.body.confirmedAt);
     assert.ok(r.body.vehiclePlate);
     assert.equal(r.body.lotName, 'Bãi đỗ xe thông minh');

@@ -304,7 +304,7 @@ export default function SessionDetailScreen({ navigation, route }) {
             <Info icon="pricetag-outline" label="Giá" value={`${formatVND(s.pricePerHour)}/giờ`} />
             <Info icon="time-outline" label={baseHours ? `Phí gửi (${baseHours} giờ × ${formatVND(s.pricePerHour)})` : 'Phí gửi'} value={formatVND(s.cost.base)} />
             {s.cost.overtime ? <Info icon="warning-outline" label="Phụ phí quá giờ" value={formatVND(s.cost.overtime)} danger /> : null}
-            {s.cost.holdFee ? <Info icon="time-outline" label={`Phí gia hạn giữ chỗ (${s.cost.holdExtensions} lần)`} value={formatVND(s.cost.holdFee)} /> : null}
+            {s.cost.holdFee ? <Info icon="time-outline" label={`Phí giữ chỗ thêm${s.cost.holdExtensions ? ` (gồm ${s.cost.holdExtensions} lần gia hạn)` : ''}`} value={formatVND(s.cost.holdFee)} /> : null}
             <View style={styles.divider} />
             <Info icon="cash-outline" label="Tổng" value={formatVND(s.cost.total)} strong />
             {open && s.cost.planned != null ? (

@@ -102,6 +102,11 @@ describe('Tra tien mat / chuyen khoan -> admin xac nhan -> mo cong', () => {
     assert.ok(qr.includes(orderId));
     assert.equal(qr.slice(-4), crc16(qr.slice(0, -4)));
     assert.equal(bank.body.payInfo.content, orderId);
+    const mbApp = bank.body.payInfo.bankApps.find((x) => x.appId === 'mb');
+    assert.ok(mbApp.url.includes('ba=0971772997%40mb'));
+    assert.ok(mbApp.url.includes(`am=${bank.body.amount}`));
+    assert.ok(mbApp.url.includes(`tn=${orderId}`));
+    await api().get('/api/payments/transfer-return').expect(200);
     await api().post(`/api/sessions/${sessionId}/manual-pay`).set(auth(an)).send({ method: 'visa' }).expect(400);
     await api().post(`/api/sessions/${sessionId}/manual-pay`).set(auth(binh)).send({ method: 'cash' }).expect(404);
     // Tai xe xem lai don: van cho, kem thong tin chuyen khoan
@@ -203,7 +208,7 @@ describe('Gia han giu cho: moi lan +5.000d, cong vao phi gui xe', () => {
     assert.equal(o.amount, done.amountDue);
     const c = (await api().post(`/api/payments/orders/${o.orderId}/confirm`).set(auth(adminToken)).send({}).expect(200)).body;
     assert.equal(c.payment.amount, done.amountDue);
-    const line = c.payment.breakdown.lines.find((l) => l.label.startsWith('Phí gia hạn giữ chỗ'));
+    const line = c.payment.breakdown.lines.find((l) => l.label.startsWith('Phí giữ chỗ thêm'));
     assert.equal(line.amount, 10000);
     assert.match(line.label, /2 lần/);
     assert.equal(c.gate.opened, true);
@@ -212,5 +217,22 @@ describe('Gia han giu cho: moi lan +5.000d, cong vao phi gui xe', () => {
   test('Khong gia han -> khong co phi giu cho', async () => {
     const s = (await api().get(`/api/sessions/${sessionId}`).set(auth(an)).expect(200)).body;
     assert.equal(s.cost.holdFee, 0);
+  });
+});
+
+describe('Thoi gian giu cho luc dat: 15 phut dau mien phi, moi nac 15 phut +5.000d', () => {
+  test('Giu 45 phut -> +10.000d; gia han them 1 lan -> 15.000d; cong vao phi khi ra cong', async () => {
+    const t = await register('mp_hold45');
+    // Ra het cac o truoc do de con o trong
+    await db.query(`UPDATE slots SET state = 'free' WHERE lot_id = $1`, [LOT]);
+    device.state.slots.forEach((x) => { x.reserved = false; x.occupied = false; });
+    const r = (await api().post(`/api/lots/${LOT}/reservations`).set(auth(t)).send({ minutes: 45, durationMinutes: 60 }).expect(201)).body;
+    assert.equal(r.estimatedFee, 10000 + 10000); // 1 gio x 10.000 + giu 45' (2 nac) 10.000
+    const e = (await api().post(`/api/reservations/${r.id}/extend`).set(auth(t)).send({ minutes: 10 }).expect(200)).body;
+    assert.equal(e.estimatedFee, 25000);
+    const inn = (await checkin(t)).body;
+    const s = (await api().get(`/api/sessions/${inn.sessionId}`).set(auth(t)).expect(200)).body;
+    assert.equal(s.cost.holdFee, 15000);
+    assert.equal(s.cost.holdExtensions, 1);
   });
 });

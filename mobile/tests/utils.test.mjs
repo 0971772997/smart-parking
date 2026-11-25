@@ -60,3 +60,10 @@ describe('Dinh dang thoi gian, tien', () => {
     assert.equal(estimateFee(null, 60), null);
   });
 });
+
+describe('Phi giu cho luc dat (giong may chu)', () => {
+  test('15 phut dau mien phi, moi nac 15 phut +5.000d', async () => {
+    const { holdFee } = await import('../src/utils/booking.js');
+    assert.deepEqual([15, 30, 45, 60, 16].map((m) => holdFee(m)), [0, 5000, 10000, 15000, 5000]);
+  });
+});

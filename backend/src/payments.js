@@ -47,8 +47,9 @@ function breakdownOf(s) {
   if (base > 0) lines.push({ label: `Phí gửi xe ${hours} giờ × ${vnd(s.price_per_hour)}`, amount: base });
   if (overtime > 0) lines.push({ label: 'Phụ phí quá giờ dự kiến', amount: overtime });
   if (hold > 0) {
-    const n = Math.round(hold / RULES.extend.fee);
-    lines.push({ label: `Phí gia hạn giữ chỗ (${n} lần × ${vnd(RULES.extend.fee)})`, amount: hold });
+    // Gom: giu cho qua 15' luc dat (moi nac 15' +5.000d) + moi lan gia han giu cho (+5.000d)
+    const n = Number(s.hold_extensions) || 0;
+    lines.push({ label: `Phí giữ chỗ thêm${n ? ` (gồm ${n} lần gia hạn × ${vnd(RULES.extend.fee)})` : ''}`, amount: hold });
   }
   if (fee === 0) lines.push({ label: 'Miễn phí (rời bãi trong thời gian ân hạn)', amount: 0 });
   return {

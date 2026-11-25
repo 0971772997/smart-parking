@@ -92,7 +92,7 @@ function createGatePass(secret) {
 async function lastSession(db, reservationId) {
   return db.one(
     `SELECT ps.*, p.id AS payment_id, COALESCE(ps.hourly_rate, l.price_per_hour) AS price_per_hour,
-            COALESCE(r.extend_count, 0) AS hold_extensions
+            COALESCE(r.hold_fee, 0) AS resv_hold_fee, COALESCE(r.extend_count, 0) AS hold_extensions
      FROM parking_sessions ps LEFT JOIN payments p ON p.session_id = ps.id
      JOIN slots s ON s.id = ps.slot_id JOIN parking_lots l ON l.id = s.lot_id
      LEFT JOIN reservations r ON r.id = ps.reservation_id

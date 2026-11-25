@@ -4,7 +4,8 @@ import { colors } from '../theme';
 // Giong backend/src/booking.js - chi dung khi GET /reservations/rules loi
 export const DEFAULT_RULES = {
   maxActivePerUser: 1,
-  hold: { min: 5, max: 120, default: 15, options: [15, 30, 45, 60] },
+  // 15 phut giu cho dau mien phi, moi nac 15 phut them +5.000d
+  hold: { min: 5, max: 120, default: 15, options: [15, 30, 45, 60], freeMinutes: 15, stepMinutes: 15, stepFee: 5000 },
   duration: { min: 30, max: 1440, default: 120, options: [60, 120, 180, 240, 480] },
   extend: { maxTimes: 2, min: 5, max: 30, options: [10, 15, 30], fee: 5000 }, // moi lan gia han giu cho +5.000d
   graceSeconds: 60,
@@ -53,6 +54,14 @@ export const formatDateTime = (d) => {
 /** Phi du kien = so gio (lam tron len, toi thieu 1) x gia/gio - giong may chu */
 export const estimateFee = (pricePerHour, minutes) =>
   pricePerHour == null ? null : Math.max(1, Math.ceil(minutes / 60)) * pricePerHour;
+
+/** Phi giu cho luc dat (giong may chu): 15 phut dau mien phi, moi nac 15 phut (lam tron len) +5.000d */
+export const holdFee = (minutes, hold = DEFAULT_RULES.hold) => {
+  const free = hold.freeMinutes ?? 15;
+  const step = hold.stepMinutes ?? 15;
+  const fee = hold.stepFee ?? 5000;
+  return Math.ceil(Math.max(0, minutes - free) / step) * fee;
+};
 
 /** Ly do that bai -> tieng Viet */
 export const FAIL_REASONS = {

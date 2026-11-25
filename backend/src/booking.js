@@ -12,7 +12,8 @@ const { emitPush } = require('./notifyHub');
 
 const RULES = {
   maxActivePerUser: 1,                                         // moi tai khoan chi 1 dat cho dang hieu luc
-  hold: { min: 5, max: 120, default: 15, options: [15, 30, 45, 60] },          // phut giu cho cho xe den
+  // phut giu cho cho xe den: 15' dau mien phi, moi nac 15' them +5.000d (cong vao phi gui xe)
+  hold: { min: 5, max: 120, default: 15, options: [15, 30, 45, 60], freeMinutes: 15, stepMinutes: 15, stepFee: 5000 },
   duration: { min: 30, max: 1440, default: 120, options: [60, 120, 180, 240, 480] }, // thoi luong gui du kien (phut)
   // gia han giu cho: toi da 2 lan, moi lan <= 30 phut, MOI LAN +5.000d (cong vao phi gui xe, tra khi ra cong)
   extend: { maxTimes: 2, min: 5, max: 30, options: [10, 15, 30], fee: 5000 },
@@ -44,6 +45,13 @@ function newCode() {
 // Phi du kien = so gio (lam tron len, toi thieu 1) x gia/gio - giong cach tinh phi luot do that
 const estimateFee = (pricePerHour, durationMinutes) =>
   Math.max(1, Math.ceil(durationMinutes / 60)) * pricePerHour;
+
+// Phi giu cho luc dat: RULES.hold.freeMinutes dau mien phi, moi nac RULES.hold.stepMinutes them (lam tron len)
+//   +RULES.hold.stepFee. Mac dinh: 15' = 0d, 30' = 5.000d, 45' = 10.000d, 60' = 15.000d
+const holdFee = (minutes) => {
+  const { freeMinutes, stepMinutes, stepFee } = RULES.hold;
+  return Math.ceil(Math.max(0, minutes - freeMinutes) / stepMinutes) * stepFee;
+};
 
 // Het han "luoi": goi truoc moi lan doc/dat cho thay vi chay dinh ky
 // (tranh danh thuc Neon moi 30s khi khong ai dung app). Thiet bi van tu het han theo dong ho rieng
@@ -104,4 +112,4 @@ const RESERVATION_SELECT = `
   JOIN parking_lots l ON l.id = s.lot_id
   LEFT JOIN vehicles veh ON veh.id = r.vehicle_id`;
 
-module.exports = { RULES, RESERVATION_SELECT, newCode, estimateFee, expireStale, notifyExpired, suspension, zoneSql };
+module.exports = { RULES, RESERVATION_SELECT, newCode, estimateFee, holdFee, expireStale, notifyExpired, suspension, zoneSql };

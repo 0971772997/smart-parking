@@ -403,3 +403,9 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- v16: Phi gia han giu cho (moi lan gia han dat cho +RULES.extend.fee), cong vao phi gui xe khi chot phi
 ALTER TABLE parking_sessions ADD COLUMN IF NOT EXISTS hold_fee INT NOT NULL DEFAULT 0;
+
+-- v17: Phi giu cho tren dat cho = muc giu cho luc dat (15 phut dau mien phi, moi nac 15 phut +5.000d)
+--      + moi lan gia han giu cho +5.000d. Chot vao parking_sessions.hold_fee khi chot phi.
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS hold_fee INT NOT NULL DEFAULT 0;
+-- Dat cho cu (v16) chi tinh theo so lan gia han
+UPDATE reservations SET hold_fee = extend_count * 5000 WHERE hold_fee = 0 AND extend_count > 0;

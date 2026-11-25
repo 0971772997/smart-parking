@@ -111,6 +111,14 @@ Các nhóm test chính: đăng ký/đăng nhập, phân quyền, đặt chỗ (t
 | `manualpay.test.js` (+2 test): gia hạn 2 lần → phí dự kiến +10.000đ; vào bãi → phí tạm tính có `holdFee` 10.000đ; rời ô → phí chốt gồm 10.000đ, cổng ra báo 402 đúng số tiền; trả tiền mặt → biên nhận có dòng "Phí gia hạn giữ chỗ (2 lần × 5.000đ)"; không gia hạn → 0đ | **PASS** |
 | `tests/unit/fees.test.js` (+1): phí giữ chỗ luôn cộng vào tổng, kể cả vào rồi ra miễn phí trong ân hạn | **PASS** |
 
+### 1.8 Mở app ngân hàng tự điền số tiền + nội dung (25/11/2026)
+
+| Kiểm tra | Kết quả |
+|---|---|
+| `tests/unit/vietqr.test.js` (+1): deeplink `dl.vietqr.io/pay` cho MB có `ba=0971772997@mb`, `am`, `tn`, `bn`, `url`; app không hỗ trợ tự điền (VCB) chỉ mở app | **PASS** |
+| `manualpay.test.js`: `payInfo.bankApps` có link MB đúng số tiền, nội dung; trang quay lại `/api/payments/transfer-return` | **PASS** — backend toàn bộ **317/317** |
+| Chrome: màn chờ xác nhận hiện nút "Mở MB Bank – tự điền" + BIDV / VietinBank / ACB / OCB; mã VietQR chỉ còn là phương án dự phòng | Đạt. **Chưa thử trên điện thoại thật** (link chỉ mở app khi chạy trên điện thoại đã cài app ngân hàng) |
+
 ## 2. Kiểm thử end-to-end với Wokwi (API thật + broker + ESP32 mô phỏng)
 
 ### 2.1 Bằng script `backend/scripts/e2e.js` (19/11/2026)

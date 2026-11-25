@@ -45,6 +45,7 @@ module.exports = {
     payee: {
       bankName: process.env.PAY_BANK_NAME || 'MB Bank',
       bankBin: process.env.PAY_BANK_BIN || '970422', // ma BIN NAPAS cua MB Bank
+      bankCode: process.env.PAY_BANK_CODE || 'mb',   // ma ngan hang cho deeplink VietQR (STK@mb)
       accountNo: process.env.PAY_ACCOUNT_NO || '0971772997',
       accountName: process.env.PAY_ACCOUNT_NAME || 'VO VIET MINH',
       momoPhone: process.env.PAY_MOMO_PHONE || '0971772997',

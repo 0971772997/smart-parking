@@ -4,7 +4,7 @@ const { wrap, badRequest, notFound, conflict, HttpError } = require('../errors')
 const v = require('../validate');
 const map = require('../mappers');
 const { setLotPrice } = require('../pricing');
-const { RULES, RESERVATION_SELECT, newCode, estimateFee, expireStale, suspension, zoneSql } = require('../booking');
+const { RULES, RESERVATION_SELECT, newCode, estimateFee, holdFee, expireStale, suspension, zoneSql } = require('../booking');
 const { notify, hhmm } = require('../sessions');
 const { audit } = require('../admin');
 
@@ -119,10 +119,11 @@ module.exports = function lotRoutes({ db, auth, device }) {
     let resv;
     try {
       resv = await db.one(
-        `INSERT INTO reservations (user_id, slot_id, vehicle_id, minutes, request_id, code, duration_minutes, estimated_fee, hourly_rate)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+        `INSERT INTO reservations (user_id, slot_id, vehicle_id, minutes, request_id, code, duration_minutes, estimated_fee,
+           hourly_rate, hold_fee)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
         [req.user.id, slot.id, vehicleId, minutes, requestId, newCode(), durationMinutes,
-          estimateFee(lot.price_per_hour, durationMinutes), lot.price_per_hour],
+          estimateFee(lot.price_per_hour, durationMinutes) + holdFee(minutes), lot.price_per_hour, holdFee(minutes)],
       );
     } catch (e) {
       if (e.code === '23505') throw conflict('slot_not_free', 'O do vua duoc nguoi khac dat');

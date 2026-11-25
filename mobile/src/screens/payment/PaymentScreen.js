@@ -1,6 +1,6 @@
 // THANH TOAN PHI GUI XE - tra truc tiep cho bai, NHAN VIEN XAC NHAN da nhan tien roi barie cong ra tu mo:
 //   - Tien mat: dua tien cho nhan vien tai cong
-//   - Chuyen khoan ngan hang: quet ma VietQR (MB Bank) - dien san so tai khoan, so tien, noi dung
+//   - Chuyen khoan ngan hang: mo thang app ngan hang (deeplink VietQR) dien san STK, so tien, noi dung; du phong ma VietQR
 //   - Vi MoMo: chuyen tien vao so MoMo cua bai (hoac dung MoMo quet ma VietQR)
 // Chi tiet phi -> chon phuong thuc -> don cho xac nhan (noi dung CK = ma don) -> admin xac nhan -> ket qua + bien nhan.
 // Dang cho ma tat app -> mo lai man hinh se tiep tuc theo doi don cu (luu ma don tren may).
@@ -10,7 +10,6 @@ import { ActivityIndicator, Linking, Platform, Pressable, ScrollView, StyleSheet
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import * as Clipboard from 'expo-clipboard';
 import * as WebBrowser from 'expo-web-browser';
 import QRCode from 'react-native-qrcode-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -27,11 +26,12 @@ import { formatElapsed } from '../../utils/session';
 
 const METHODS = [
   { key: 'cash', label: 'Tiền mặt', sub: 'Trả cho nhân viên tại cổng ra', icon: 'cash-outline', color: '#16A34A' },
-  { key: 'bank', label: 'Chuyển khoản ngân hàng', sub: 'Quét mã VietQR bằng app ngân hàng', icon: 'business-outline', color: '#1D4ED8' },
+  { key: 'bank', label: 'Chuyển khoản ngân hàng', sub: 'Mở app ngân hàng – tự điền số tiền, nội dung', icon: 'business-outline', color: '#1D4ED8' },
   { key: 'momo', label: 'Ví MoMo', sub: 'Chuyển tiền vào ví MoMo của bãi', icon: 'wallet', color: '#A50064' },
 ];
 const POLL_MS = 3000;
 const orderKey = (sid) => `sp_pay_order_${sid}`;
+const BANK_APP_KEY = 'sp_bank_app'; // app ngan hang tai xe dung lan truoc
 
 export default function PaymentScreen({ navigation, route }) {
   const { sessionId, method: presetMethod, auto } = route.params || {};
@@ -42,10 +42,8 @@ export default function PaymentScreen({ navigation, route }) {
   const [phase, setPhase] = useState('loading'); // loading | choose | waiting | paid | failed
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const [copied, setCopied] = useState(null);
   const [now] = useState(() => Date.now());
   const polling = useRef(false);
-  const copyTimer = useRef(null);
   const autoDone = useRef(false);
 
   const applyOrder = useCallback((o) => {
@@ -90,7 +88,7 @@ export default function PaymentScreen({ navigation, route }) {
         if (alive) { setError(e.message); setPhase('choose'); }
       }
     })();
-    return () => { alive = false; clearTimeout(copyTimer.current); };
+    return () => { alive = false; };
   }, [sessionId, poll]);
 
   // Dang cho nhan vien xac nhan (hoac da xong nhung bien nhan dang duoc tao): hoi lai moi 3 giay
@@ -125,15 +123,6 @@ export default function PaymentScreen({ navigation, route }) {
     const t = setTimeout(() => pay(presetMethod), 0);
     return () => clearTimeout(t);
   });
-
-  async function copy(label, value) {
-    try {
-      await Clipboard.setStringAsync(String(value));
-      setCopied(label);
-      clearTimeout(copyTimer.current);
-      copyTimer.current = setTimeout(() => setCopied(null), 2000);
-    } catch { /* khong ho tro clipboard -> bo qua */ }
-  }
 
   // Don cong MoMo thu nghiem cu (truoc khi doi sang tra truc tiep) -> mo lai trang thanh toan
   async function openGateway(o) {
@@ -186,7 +175,7 @@ export default function PaymentScreen({ navigation, route }) {
               amount={amount} order={order}
               onRetry={() => { setOrder(null); setPhase('choose'); }} />
           ) : phase === 'waiting' && order ? (
-            <Waiting order={order} amount={amount} payee={payee} copied={copied} onCopy={copy}
+            <Waiting order={order} amount={amount} payee={payee}
               onCheck={() => poll(order.orderId)} onChange={() => setPhase('choose')} onGateway={openGateway} />
           ) : null}
 
@@ -231,10 +220,27 @@ export default function PaymentScreen({ navigation, route }) {
 }
 
 // Dang cho nhan vien xac nhan: huong dan tra tien theo phuong thuc + thong tin chuyen khoan
-function Waiting({ order, amount, payee, copied, onCopy, onCheck, onChange, onGateway }) {
+function Waiting({ order, amount, payee, onCheck, onChange, onGateway }) {
   const info = order.payInfo;
   const cash = order.method === 'cash';
   const momo = order.method === 'momo';
+  const [showQr, setShowQr] = useState(false);
+  const [lastApp, setLastApp] = useState(null);
+  const [opened, setOpened] = useState(null);
+
+  useEffect(() => {
+    AsyncStorage.getItem(BANK_APP_KEY).then(setLastApp).catch(() => {});
+  }, []);
+
+  // Mo app ngan hang: dien san STK, so tien, noi dung (app ho tro tu dien) -> tai xe chi bam xac nhan chuyen
+  function openBank(app) {
+    setOpened(app.appId);
+    setLastApp(app.appId);
+    AsyncStorage.setItem(BANK_APP_KEY, app.appId).catch(() => {});
+    if (Platform.OS === 'web') globalThis.open?.(app.url, '_blank');
+    else Linking.openURL(app.url).catch(() => setShowQr(true));
+  }
+
   if (order.provider && order.provider !== 'manual') {
     return (
       <View style={styles.card}>
@@ -248,6 +254,12 @@ function Waiting({ order, amount, payee, copied, onCopy, onCheck, onChange, onGa
       </View>
     );
   }
+
+  const apps = info?.bankApps || [];
+  const preferred = apps.find((a) => a.appId === lastApp) || apps.find((a) => a.autofill);
+  const autoApps = apps.filter((a) => a.autofill && a !== preferred);
+  const otherApps = apps.filter((a) => !a.autofill);
+
   return (
     <View style={styles.card}>
       <View style={styles.waitHead}>
@@ -262,36 +274,71 @@ function Waiting({ order, amount, payee, copied, onCopy, onCheck, onChange, onGa
           Đưa <Text style={styles.strong}>{formatVND(amount)}</Text> cho nhân viên tại cổng ra và đọc mã đơn{' '}
           <Text style={styles.strong}>{order.orderId}</Text>. Nhân viên xác nhận xong, barie sẽ tự mở.
         </Text>
-      ) : info ? (
+      ) : info && !momo ? (
         <>
+          <Text style={styles.waitHint}>
+            Chọn app ngân hàng của bạn: số tài khoản, số tiền và nội dung được <Text style={styles.strong}>điền sẵn</Text>,
+            bạn chỉ cần xác nhận chuyển rồi quay lại đây.
+          </Text>
+          {preferred ? (
+            <Button title={`Mở ${preferred.name}${preferred.autofill ? ' – tự điền' : ''}`} onPress={() => openBank(preferred)}
+              style={{ marginTop: 12 }} />
+          ) : null}
+          <View style={styles.appGrid}>
+            {autoApps.map((a) => (
+              <Pressable key={a.appId} onPress={() => openBank(a)} style={[styles.appChip, opened === a.appId && styles.appChipOn]}
+                accessibilityLabel={`Mở ${a.name}, tự điền thông tin chuyển khoản`}>
+                <Ionicons name="flash" size={13} color={colors.success} />
+                <Text style={styles.appChipText}>{a.name}</Text>
+              </Pressable>
+            ))}
+          </View>
+          {otherApps.length ? (
+            <Text style={styles.mutedSmall}>
+              {otherApps.map((a) => a.name).join(', ')} chưa hỗ trợ tự điền – dùng mã VietQR bên dưới.
+            </Text>
+          ) : null}
+          <Summary info={info} />
+          <Pressable onPress={() => setShowQr((v) => !v)} style={styles.link}>
+            <Text style={styles.linkText}>{showQr ? 'Ẩn mã QR' : 'Dùng mã VietQR (quét bằng máy khác)'}</Text>
+          </Pressable>
+          {showQr ? (
+            <View style={styles.qrBox}>
+              <QRCode value={info.vietqr} size={190} ecl="M" color={colors.navy} backgroundColor="#FFFFFF" />
+            </View>
+          ) : null}
+        </>
+      ) : info && momo ? (
+        <>
+          <Text style={styles.waitHint}>
+            Ví MoMo cá nhân chưa hỗ trợ tự điền. Mở MoMo ▸ Quét mã (hoặc chuyển tới số ví) với đúng số tiền và nội dung bên dưới.
+          </Text>
+          {Platform.OS !== 'web' ? (
+            <Button title="Mở app MoMo" onPress={() => Linking.openURL('momo://').catch(() => {})} style={{ marginTop: 12 }} />
+          ) : null}
+          <Summary info={info} momo />
           <View style={styles.qrBox}>
             <QRCode value={info.vietqr} size={190} ecl="M" color={colors.navy} backgroundColor="#FFFFFF" />
           </View>
-          <Text style={styles.muted}>
-            {momo ? 'Mở MoMo ▸ Quét mã, hoặc chuyển tiền tới số ví bên dưới' : 'Mở app ngân hàng / MoMo ▸ Quét mã QR'}
-          </Text>
-          <View style={styles.infoBox}>
-            {momo ? (
-              <CopyLine label="Số ví MoMo" value={info.momoPhone} copied={copied} onCopy={onCopy} />
-            ) : (
-              <>
-                <InfoLine label="Ngân hàng" value={info.bankName} />
-                <CopyLine label="Số tài khoản" value={info.accountNo} copied={copied} onCopy={onCopy} />
-              </>
-            )}
-            <InfoLine label="Chủ tài khoản" value={info.accountName} />
-            <CopyLine label="Số tiền" value={String(info.amount)} display={formatVND(info.amount)} copied={copied} onCopy={onCopy} />
-            <CopyLine label="Nội dung" value={info.content} copied={copied} onCopy={onCopy} />
-          </View>
-          <Text style={styles.warn}>Ghi đúng nội dung <Text style={styles.strong}>{info.content}</Text> để nhân viên đối chiếu nhanh.</Text>
-          {momo && Platform.OS !== 'web' ? (
-            <Button title="Mở app MoMo" variant="outline" onPress={() => Linking.openURL('momo://').catch(() => {})} style={{ marginTop: 10 }} />
-          ) : null}
         </>
       ) : payee ? <Text style={styles.waitHint}>Chuyển {formatVND(amount)} tới {payee.accountName}.</Text> : null}
 
       <Button title={cash ? 'Kiểm tra trạng thái' : 'Tôi đã chuyển tiền – kiểm tra'} variant="outline" onPress={onCheck} style={{ marginTop: 12 }} />
       <Pressable onPress={onChange} style={styles.link}><Text style={styles.linkText}>Đổi phương thức thanh toán</Text></Pressable>
+    </View>
+  );
+}
+
+// Thong tin chuyen khoan de doi chieu (da duoc dien san khi mo app ngan hang)
+function Summary({ info, momo }) {
+  return (
+    <View style={styles.infoBox}>
+      {momo ? <InfoLine label="Số ví MoMo" value={info.momoPhone} /> : (
+        <InfoLine label="Tài khoản" value={`${info.bankName} • ${info.accountNo}`} />
+      )}
+      <InfoLine label="Chủ tài khoản" value={info.accountName} />
+      <InfoLine label="Số tiền" value={formatVND(info.amount)} />
+      <InfoLine label="Nội dung" value={info.content} />
     </View>
   );
 }
@@ -302,19 +349,6 @@ function InfoLine({ label, value }) {
       <Text style={styles.lineLabel}>{label}</Text>
       <Text style={styles.lineValue}>{value}</Text>
     </View>
-  );
-}
-
-function CopyLine({ label, value, display, copied, onCopy }) {
-  const done = copied === label;
-  return (
-    <Pressable onPress={() => onCopy(label, value)} style={styles.line} accessibilityLabel={`Sao chép ${label}`}>
-      <Text style={styles.lineLabel}>{label}</Text>
-      <View style={styles.copyRight}>
-        <Text style={styles.lineValue}>{display || value}</Text>
-        <Ionicons name={done ? 'checkmark' : 'copy-outline'} size={15} color={done ? colors.success : colors.primary} />
-      </View>
-    </Pressable>
   );
 }
 
@@ -333,7 +367,7 @@ function FeeDetails({ s, amount, now }) {
       ) : null}
       {s.cost.overtime > 0 ? <Line label="Phụ phí quá giờ dự kiến" value={formatVND(s.cost.overtime)} danger /> : null}
       {s.cost.holdFee > 0 ? (
-        <Line label={`Phí gia hạn giữ chỗ (${s.cost.holdExtensions} lần)`} value={formatVND(s.cost.holdFee)} />
+        <Line label={`Phí giữ chỗ thêm${s.cost.holdExtensions ? ` (gồm ${s.cost.holdExtensions} lần gia hạn)` : ''}`} value={formatVND(s.cost.holdFee)} />
       ) : null}
       {s.cost.total === 0 ? <Line label="Miễn phí (rời bãi trong thời gian ân hạn)" value={formatVND(0)} /> : null}
       <View style={styles.sep} />
@@ -407,7 +441,11 @@ const styles = StyleSheet.create({
   line: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10, paddingVertical: 5 },
   lineLabel: { fontSize: 13, color: colors.textMuted, flexShrink: 1 },
   lineValue: { fontSize: 13.5, fontWeight: '700', color: colors.text, textAlign: 'right', flexShrink: 1 },
-  copyRight: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
+  appGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginTop: 10 },
+  appChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.pill, borderWidth: 1, borderColor: '#E2E8F0', backgroundColor: '#fff' },
+  appChipOn: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  appChipText: { fontSize: 13, fontWeight: '800', color: colors.text },
+  mutedSmall: { fontSize: 11.5, color: colors.textMuted, textAlign: 'center', marginTop: 8 },
   sep: { borderTopWidth: 1, borderStyle: 'dashed', borderColor: '#CBD5E1', marginVertical: 6 },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 },
   totalLabel: { fontSize: 14, fontWeight: '800', color: colors.text },

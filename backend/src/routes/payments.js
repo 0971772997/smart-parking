@@ -25,7 +25,7 @@ const { SESSION_SELECT, closeSession } = require('../sessions');
 const {
   PAYMENT_SELECT, recordPayment, settleOrder, paymentView, orderView, receiptToken, receiptHtml,
 } = require('../payments');
-const { buildVietQR } = require('../vietqr');
+const { buildVietQR, bankDeeplinks } = require('../vietqr');
 const { createGateOps } = require('../gateOps');
 
 const GATEWAY_METHODS = ['momo', 'atm', 'card'];
@@ -112,9 +112,19 @@ module.exports = function paymentRoutes({ db, auth, device, gateway, publicUrl, 
     return {
       ...payeeView(), amount: o.amount, content: o.order_id,
       vietqr: buildVietQR({ bin: payee.bankBin, accountNo: payee.accountNo, amount: o.amount, content: o.order_id }),
+      // Mo thang app ngan hang, dien san STK + so tien + noi dung (app autofill=false chi mo duoc app)
+      bankApps: bankDeeplinks({ payee, amount: o.amount, content: o.order_id, returnUrl: `${publicUrl}/api/payments/transfer-return` }),
     };
   }
   const manualOut = async (o) => ({ ...(await orderOut(o)), payInfo: payInfo(o) });
+
+  // Trang dich vu deeplink VietQR quay ve sau khi chuyen khoan -> nhac tai xe mo lai SmartPark
+  r.get('/payments/transfer-return', (_req, res) => {
+    res.type('html').send(`<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Quay lại SmartPark</title><style>body{font-family:system-ui,sans-serif;background:#f1f5f9;margin:0;padding:32px;text-align:center;color:#0f172a}
+.c{max-width:380px;margin:auto;background:#fff;border-radius:16px;padding:28px;box-shadow:0 4px 24px rgba(0,0,0,.08)}h1{font-size:20px;color:#1d4ed8}p{color:#64748b;font-size:14px}</style>
+</head><body><div class="c"><h1>Đã gửi lệnh chuyển tiền</h1><p>Hãy quay lại ứng dụng <b>SmartPark</b> và chờ nhân viên xác nhận. Barie cổng ra sẽ tự mở.</p></div></body></html>`);
+  });
 
   r.post('/sessions/:id/manual-pay', user, wrap(async (req, res) => {
     const id = v.int(req.params, 'id', { min: 1 });

@@ -19,3 +19,21 @@ test('Khong co so tien -> ma tinh (11); noi dung bo dau / ky tu dac biet', () =>
   assert.ok(!q.includes('5405'));
   assert.equal(cleanContent('Phí gửi xe #12 – Đà Nẵng'), 'Phi gui xe 12  Da Nang');
 });
+
+test('Deeplink app ngan hang: app tu dien co STK@mb, so tien, noi dung; app khong ho tro chi mo app', () => {
+  const { bankDeeplinks } = require('../../src/vietqr');
+  const apps = bankDeeplinks({
+    payee: { accountNo: '0971772997', bankCode: 'mb', accountName: 'VO VIET MINH' },
+    amount: 15000, content: 'SP12AB34', returnUrl: 'https://api.vd/api/payments/transfer-return',
+  });
+  const mb = apps.find((a) => a.appId === 'mb');
+  assert.equal(mb.autofill, true);
+  const u = new URL(mb.url);
+  assert.equal(u.origin + u.pathname, 'https://dl.vietqr.io/pay');
+  assert.deepEqual(Object.fromEntries(u.searchParams), {
+    app: 'mb', ba: '0971772997@mb', am: '15000', tn: 'SP12AB34', bn: 'VO VIET MINH', url: 'https://api.vd/api/payments/transfer-return',
+  });
+  const vcb = apps.find((a) => a.appId === 'vcb');
+  assert.equal(vcb.autofill, false);
+  assert.equal(vcb.url, 'https://dl.vietqr.io/pay?app=vcb');
+});
